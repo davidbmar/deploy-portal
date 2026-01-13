@@ -18,7 +18,7 @@ This document provides comprehensive visual diagrams of the entire authenticatio
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              USER BROWSER                               │
-│                         (https://gateway.example.com)                   │
+│                         (https://52.43.35.1)                   │
 └────────────────────────────────┬────────────────────────────────────────┘
                                  │
                                  │ HTTPS Request
@@ -100,7 +100,7 @@ This document provides comprehensive visual diagrams of the entire authenticatio
 │ BROWSER │
 └────┬────┘
      │
-     │ 1. GET https://gateway.example.com/
+     │ 1. GET https://52.43.35.1/
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -172,7 +172,7 @@ This document provides comprehensive visual diagrams of the entire authenticatio
                         └──────────────┬───────────────────────┘
                                       │
                                       │ 9. Redirect with auth code
-                                      │    https://gateway.example.com/oauth2/callback?code=XXX
+                                      │    https://52.43.35.1/oauth2/callback?code=XXX
                                       │
                                       ▼
                         ┌──────────────────────────────────────┐
@@ -199,7 +199,7 @@ This document provides comprehensive visual diagrams of the entire authenticatio
                         │        HttpOnly, Secure, SameSite    │
                         │                                      │
                         │  13. Redirect to original URL        │
-                        │      https://gateway.example.com/    │
+                        │      https://52.43.35.1/    │
                         │                                      │
                         └──────────────┬───────────────────────┘
                                       │
@@ -579,7 +579,7 @@ DEPLOYMENT WORKFLOW:
 │                         DEVELOPER WORKSTATION                           │
 │                                                                         │
 │  1. Developer authenticates via browser:                                │
-│     https://gateway.example.com/deploy/                                 │
+│     https://52.43.35.1/deploy/                                 │
 │                                                                         │
 │  2. Deploy Portal provisions access:                                    │
 │     • Detects developer's public IP                                    │
@@ -633,7 +633,7 @@ DEPLOYMENT WORKFLOW:
 │                 data/port-registry.json                                │
 │                                                                         │
 │  C. Application is now live at:                                         │
-│     https://gateway.example.com/my-app/                                │
+│     https://52.43.35.1/my-app/                                │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 

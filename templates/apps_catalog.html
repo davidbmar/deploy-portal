@@ -245,8 +245,8 @@ function deleteApp(appName) {
     deleteBtn.disabled = true;
     deleteBtn.textContent = 'Deleting...';
 
-    // Call delete API
-    fetch('/apps/delete/' + appName, {
+    // Call delete API (must use full path with /deploy/ prefix)
+    fetch('/deploy/apps/delete/' + appName, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'

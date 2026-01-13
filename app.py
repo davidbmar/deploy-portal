@@ -1098,7 +1098,7 @@ def landing_page():
                          deployed_count=deployed_count,
                          recent_activity=recent_activity)
 
-@app.route('/apps')
+@app.route('/deploy/apps')
 def apps_catalog():
     """App catalog page - show all deployed apps"""
     email, _ = get_user_info()
@@ -1277,7 +1277,7 @@ def activity_stream():
 
     return Response(generate(), mimetype='text/event-stream')
 
-@app.route('/apps/delete/<app_name>', methods=['POST'])
+@app.route('/deploy/apps/delete/<app_name>', methods=['POST'])
 def delete_app_endpoint(app_name):
     """Delete a deployed app"""
     email, _ = get_user_info()

@@ -83,66 +83,30 @@
     </div>
 
     <div class="card">
-        <h2>⚡ Quick Start - What to Do After Download</h2>
-
-        <h3 style="margin-top: 20px;">📍 Step 1: Extract to the Right Location</h3>
-        <p><strong>IMPORTANT:</strong> Extract to a location Claude Code can access.</p>
-
-        <div style="background: #f6f8fa; padding: 15px; border-radius: 6px; margin: 10px 0;">
-            <strong>On Mac:</strong>
-            <pre style="margin: 10px 0; padding: 10px; background: #fff; border: 1px solid #e1e4e8; border-radius: 4px;">
-# Create projects folder (if you don't have one)
-mkdir -p ~/Documents/claude-projects
-
-# Move the downloaded ZIP there
-mv ~/Downloads/deployment-kit-*.zip ~/Documents/claude-projects/
-
-# Navigate and extract
-cd ~/Documents/claude-projects
-unzip deployment-kit-*.zip
-cd your-app-name/</pre>
-
-            <strong>On Linux/Windows:</strong>
-            <pre style="margin: 10px 0; padding: 10px; background: #fff; border: 1px solid #e1e4e8; border-radius: 4px;">
-# Extract to your projects directory
-mkdir -p ~/projects/claude-projects
-mv ~/Downloads/deployment-kit-*.zip ~/projects/claude-projects/
-cd ~/projects/claude-projects
-unzip deployment-kit-*.zip
-cd your-app-name/</pre>
-        </div>
-
-        <h3 style="margin-top: 20px;">🤖 Step 2: Deploy with Claude Code</h3>
-        <ol style="line-height: 1.8;">
-            <li><strong>Open terminal in the extracted folder:</strong>
-                <pre style="margin: 5px 0 10px 20px; padding: 10px; background: #f6f8fa; border-radius: 4px;">cd ~/Documents/claude-projects/your-app-name</pre>
-            </li>
-            <li><strong>Start Claude Code:</strong>
-                <pre style="margin: 5px 0 10px 20px; padding: 10px; background: #f6f8fa; border-radius: 4px;">claude-code</pre>
-            </li>
-            <li><strong>Copy the deployment prompt:</strong>
-                <pre style="margin: 5px 0 10px 20px; padding: 10px; background: #f6f8fa; border-radius: 4px;">cat CLAUDE_PROMPT.txt</pre>
-                Then copy ALL the text and paste it into Claude Code.
-            </li>
-            <li><strong>Press Enter</strong> and let Claude deploy your app automatically! 🚀</li>
+        <h2>⚡ What to Do After Download</h2>
+        <ol style="font-size: 1.1em; line-height: 2;">
+            <li>Copy the <code>deployment-kit-*.zip</code> file into your project directory</li>
+            <li>Unzip it: <code>unzip deployment-kit-*.zip</code></li>
+            <li>Follow the instructions contained within the kit</li>
         </ol>
 
-        <h3 style="margin-top: 20px;">📦 What's in the Kit?</h3>
+        <p style="margin-top: 20px;">
+            The deployment kit contains everything you need, including:
+        </p>
         <ul style="line-height: 1.8;">
-            <li><code>deploy-key.pem</code> - SSH private key (keep secure!)</li>
-            <li><code>CLAUDE_PROMPT.txt</code> - Ready-to-paste instructions for Claude</li>
-            <li><code>DEPLOY_INSTRUCTIONS.md</code> - Human-readable deployment guide</li>
-            <li><code>app-config.json</code> - Your app configuration details</li>
-            <li><code>README.md</code> - Quick overview</li>
+            <li>🔑 SSH key for server access</li>
+            <li>📝 <strong>CLAUDE_PROMPT.txt</strong> - Paste this into Claude Code to deploy automatically</li>
+            <li>📖 <strong>DEPLOY_INSTRUCTIONS.md</strong> - Complete step-by-step guide</li>
+            <li>⚙️ Configuration files for your app</li>
         </ul>
 
-        <div style="background: #fff3cd; padding: 15px; border-radius: 6px; border-left: 4px solid #ffc107; margin-top: 20px;">
-            <strong>💡 Pro Tip:</strong> The kit includes everything. Just extract, navigate to the folder in your terminal, start Claude Code, and paste the CLAUDE_PROMPT.txt contents. Claude will handle SSH connection, file uploads, port allocation, nginx configuration, and deployment!
+        <div style="background: #e7f3ff; padding: 15px; border-radius: 6px; border-left: 4px solid #0366d6; margin-top: 20px;">
+            <strong>💡 Quick Tip:</strong> If using Claude Code, just open the extracted folder in your terminal and paste the contents of <code>CLAUDE_PROMPT.txt</code> - Claude will handle everything!
         </div>
 
         <div style="margin-top: 20px;">
             <a href="/docs/mac-deployment" class="btn btn-secondary" style="text-decoration: none;">
-                📖 View Detailed Step-by-Step Guide
+                📖 Need More Help? View Detailed Guide
             </a>
         </div>
     </div>

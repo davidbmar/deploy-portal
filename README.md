@@ -202,6 +202,90 @@ class Config:
 | `/status` | System status and health checks |
 | `/deploy/activity` | Activity logs viewer |
 
+## 🔧 Nginx Configuration
+
+This application uses a **modular nginx configuration architecture** where each app manages its own routing configuration. The deploy-portal repo contains two nginx files that are deployed to the gateway server.
+
+### Configuration Files in this Repo
+
+**nginx/upstream.conf** - Upstream definition:
+```nginx
+upstream deploy_portal {
+    server 127.0.0.1:5000;
+}
+```
+
+**nginx/routes.conf** - Location blocks for / and /deploy/* endpoints:
+```nginx
+# Static files for deploy portal (no auth needed for CSS/JS)
+location /deploy/static/ {
+    alias /home/ubuntu/src/deploy-portal/static/;
+    expires 1h;
+    add_header Cache-Control "public, immutable";
+}
+
+# Protected: Deploy Portal (root page and all /deploy/* routes)
+location / {
+    # Authentication check via oauth2-proxy
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/start?rd=$scheme://$host$request_uri;
+
+    # Pass authentication headers from oauth2-proxy to backend
+    auth_request_set $user $upstream_http_x_auth_request_user;
+    auth_request_set $email $upstream_http_x_auth_request_email;
+    auth_request_set $auth_cookie $upstream_http_set_cookie;
+    add_header Set-Cookie $auth_cookie;
+
+    # Proxy to deploy portal application (port 5000)
+    proxy_pass http://deploy_portal;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Pass authenticated user info to backend
+    proxy_set_header X-User-Email $email;
+    proxy_set_header X-Auth-Request-User $user;
+
+    # WebSocket support for terminal functionality
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+}
+```
+
+### Deployment to Gateway Server
+
+When deploying or updating the nginx configuration, copy these files to the gateway:
+
+```bash
+# Copy upstream configuration
+sudo cp /home/ubuntu/src/deploy-portal/nginx/upstream.conf \
+        /etc/nginx/conf.d/system-upstreams/deploy-portal.conf
+
+# Copy routes configuration
+sudo cp /home/ubuntu/src/deploy-portal/nginx/routes.conf \
+        /etc/nginx/conf.d/routes/deploy-portal.conf
+
+# Test and reload nginx
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Architecture Benefits
+
+- **Separation of Concerns**: deploy-portal owns its routing configuration
+- **Version Control**: nginx configs are versioned with application code
+- **Easy Updates**: Modify routes without touching the central gateway config
+- **No Conflicts**: Each app manages its own namespace (/ssh, /cloner, etc.)
+
+### Routes Managed by this App
+
+- `/` - Deploy portal main interface (port 5000)
+- `/deploy/*` - All deploy portal routes
+- `/docs/*` - Documentation pages
+- `/deploy/static/` - Static assets (no auth required)
+
 ## 🔐 Security
 
 ### Authentication

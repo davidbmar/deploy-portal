@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Capsule Cloud - Your Personal Development Platform{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="hero">
+    <h1>🧊 Welcome to Capsule Cloud</h1>
+    <p>Your personal development cloud platform</p>
+    <p style="font-size: 16px; color: #888; margin-bottom: 40px;">
+        Deploy apps, access SSH, clone websites - all in one secure portal
+    </p>
+    <div class="hero-actions">
+        <a href="/deploy" class="btn btn-primary">Get Started</a>
+        <a href="/apps" class="btn btn-secondary">View Apps</a>
+        <a href="/docs" class="btn btn-secondary">Documentation</a>
+    </div>
+</div>
+
+<div class="container" style="margin-top: 40px;">
+    <!-- Service Cards -->
+    <div class="section-header">
+        <h2>🛠️ Services & Tools</h2>
+    </div>
+
+    <div class="service-grid">
+        <!-- SSH Terminal Card -->
+        <a href="/ssh" class="service-card">
+            <div class="service-card-icon">🖥️</div>
+            <h3>SSH Terminal</h3>
+            <p>Access your server from anywhere with our browser-based terminal. Full terminal emulation with copy/paste support.</p>
+            <div class="stats">
+                <span class="status-badge running">Running</span>
+            </div>
+        </a>
+
+        <!-- Website Cloner Card -->
+        <a href="/cloner" class="service-card">
+            <div class="service-card-icon">🌐</div>
+            <h3>Website Cloner</h3>
+            <p>Clone and deploy static websites with ease. Scrape assets, preview, and deploy to Vercel or Netlify.</p>
+            <div class="stats">
+                <span class="status-badge running">Running</span>
+            </div>
+        </a>
+
+        <!-- Deploy Portal Card -->
+        <a href="/deploy" class="service-card">
+            <div class="service-card-icon">🚀</div>
+            <h3>Deploy Portal</h3>
+            <p>Automated deployment provisioning with SSH key distribution, port allocation, and systemd service creation.</p>
+            <div class="stats">
+                <span class="status-badge running">Running</span>
+            </div>
+        </a>
+
+        <!-- Your Apps Card -->
+        <a href="/apps" class="service-card">
+            <div class="service-card-icon">📦</div>
+            <h3>Your Apps</h3>
+            <p>View and manage all your deployed applications. Monitor status, view logs, and control services.</p>
+            <div class="stats">
+                <span>{{ deployed_count }} deployed</span>
+            </div>
+        </a>
+    </div>
+
+    <!-- Quick Start Section -->
+    <div class="card" style="margin-top: 40px;">
+        <div class="section-header">
+            <h2>⚡ Quick Start</h2>
+        </div>
+        <ol>
+            <li>
+                <strong>Get your deployment kit</strong><br>
+                Visit the <a href="/deploy" style="color: #60a5fa;">Deploy Portal</a> to download your personalized deployment kit with SSH keys and automation scripts.
+            </li>
+            <li>
+                <strong>Deploy your application</strong><br>
+                Use Claude Code on your Mac to deploy apps automatically. The kit includes everything Claude needs to deploy to your directory.
+            </li>
+            <li>
+                <strong>Monitor and manage</strong><br>
+                View your deployed apps in the <a href="/apps" style="color: #60a5fa;">Apps catalog</a>, monitor health, view logs, and control services.
+            </li>
+        </ol>
+    </div>
+
+    <!-- Recent Activity -->
+    {% if recent_activity %}
+    <div class="card" style="margin-top: 40px;">
+        <div class="section-header">
+            <h2>📊 Recent Activity</h2>
+            <a href="/deploy/activity" style="color: #60a5fa; font-size: 14px; text-decoration: none;">View All →</a>
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+            {% for activity in recent_activity %}
+            <div class="log-entry">
+                <span class="log-time">{{ activity.time }}</span>
+                <span class="log-user">{{ activity.user }}</span>
+                <span class="log-content">{{ activity.content }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- System Status Bar -->
+    <div class="card" style="margin-top: 40px;">
+        <div class="section-header">
+            <h2>💚 System Status</h2>
+            <a href="/status" style="color: #60a5fa; font-size: 14px; text-decoration: none;">Details →</a>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+            <div>
+                <div style="font-size: 13px; color: #888; margin-bottom: 5px;">SSH Terminal</div>
+                <span class="status-badge running">Running</span>
+            </div>
+            <div>
+                <div style="font-size: 13px; color: #888; margin-bottom: 5px;">Deploy Portal</div>
+                <span class="status-badge running">Running</span>
+            </div>
+            <div>
+                <div style="font-size: 13px; color: #888; margin-bottom: 5px;">Website Cloner</div>
+                <span class="status-badge running">Running</span>
+            </div>
+            <div>
+                <div style="font-size: 13px; color: #888; margin-bottom: 5px;">Deployed Apps</div>
+                <span class="status-badge {% if deployed_count > 0 %}running{% else %}pending{% endif %}">
+                    {{ deployed_count }} active
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Features Highlight -->
+    <div class="card" style="margin-top: 40px;">
+        <div class="section-header">
+            <h2>✨ Why Capsule?</h2>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px;">
+            <div>
+                <h3 style="font-size: 18px; margin-bottom: 10px;">🔐 Secure by Default</h3>
+                <p style="color: #b0b0b0; font-size: 14px;">
+                    Cognito authentication, IP whitelisting, and secure SSH key distribution ensure your deployments are safe.
+                </p>
+            </div>
+            <div>
+                <h3 style="font-size: 18px; margin-bottom: 10px;">🚀 Lightning Fast</h3>
+                <p style="color: #b0b0b0; font-size: 14px;">
+                    Automated port allocation, nginx configuration, and systemd service creation mean deployments take minutes, not hours.
+                </p>
+            </div>
+            <div>
+                <h3 style="font-size: 18px; margin-bottom: 10px;">📊 Full Monitoring</h3>
+                <p style="color: #b0b0b0; font-size: 14px;">
+                    Real-time health checks, live activity logs, and systemd integration give you complete visibility into your apps.
+                </p>
+            </div>
+            <div>
+                <h3 style="font-size: 18px; margin-bottom: 10px;">🤖 AI-Powered</h3>
+                <p style="color: #b0b0b0; font-size: 14px;">
+                    Designed to work seamlessly with Claude Code. Download your kit and let Claude handle the deployment automatically.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Documentation Link -->
+    <div style="text-align: center; margin: 60px 0 40px; padding: 40px; background: rgba(59, 130, 246, 0.05); border-radius: 10px; border: 1px solid rgba(59, 130, 246, 0.2);">
+        <h2 style="margin-bottom: 15px;">📚 Need Help Getting Started?</h2>
+        <p style="color: #b0b0b0; margin-bottom: 25px;">
+            Check out our comprehensive documentation for guides, tutorials, and API reference.
+        </p>
+        <a href="/docs" class="btn btn-primary">View Documentation</a>
+    </div>
+</div>
+{% endblock %}

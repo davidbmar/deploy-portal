@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}Provision Access - Deploy Portal{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>🚀 Cloud Deployment Access</h1>
+
+    <div class="card">
+        <h2>👤 Your Information</h2>
+        <dl>
+            <dt>Email</dt>
+            <dd>{{ email }}</dd>
+            <dt>Your IP Address</dt>
+            <dd>{{ ip }}</dd>
+            <dt>Target Server</dt>
+            <dd>{{ instance_ip }}</dd>
+            <dt>SSH Status</dt>
+            <dd>
+                {% if whitelisted %}
+                <span class="status status-ok">✅ Your IP is whitelisted</span>
+                {% else %}
+                <span class="status status-pending">⏳ IP not yet whitelisted</span>
+                {% endif %}
+            </dd>
+        </dl>
+    </div>
+
+    <div class="card">
+        <h2>📱 Application Details</h2>
+        <p>Specify your application name for automated deployment setup.</p>
+        <form id="app-form">
+            <div class="form-group">
+                <label for="app-name">App Name *</label>
+                <input
+                    type="text"
+                    id="app-name"
+                    name="app_name"
+                    placeholder="my-app-01"
+                    pattern="^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$"
+                    required
+                    autocomplete="off"
+                />
+                <small>Lowercase letters, numbers, and hyphens only (2-32 characters)</small>
+                <div id="name-validation" class="validation-message"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="app-type">App Type (optional)</label>
+                <select id="app-type" name="app_type">
+                    <option value="other">Detect Automatically</option>
+                    <option value="node">Node.js</option>
+                    <option value="python">Python</option>
+                    <option value="docker">Docker</option>
+                    <option value="go">Go</option>
+                </select>
+                <small>Helps generate better deployment instructions</small>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📦 Get Deployment Kit</h2>
+        <p>Download everything you need to deploy your application:</p>
+        <ul>
+            <li>🔑 SSH private key (.pem file)</li>
+            <li>📝 Connection instructions</li>
+            <li>🤖 Claude Code prompt template</li>
+        </ul>
+
+        <div class="actions">
+            {% if not whitelisted %}
+            <button id="provision-btn" class="btn btn-primary" onclick="provisionAccess()">
+                🔓 Whitelist My IP
+            </button>
+            {% endif %}
+            <button type="button" class="btn btn-success" id="download-btn" onclick="downloadKit()" disabled>
+                ⬇️ Download Deployment Kit
+            </button>
+        </div>
+
+        <div id="status-message" class="message" style="display: none;"></div>
+    </div>
+
+    <div class="card">
+        <h2>⚡ Quick Start</h2>
+        <ol>
+            <li>Click "Download Deployment Kit"</li>
+            <li>Extract the zip file</li>
+            <li>Run <code>chmod 600 capsule-deploy.pem</code></li>
+            <li>Open Claude Code in your project directory</li>
+            <li>Give Claude the CLAUDE_PROMPT.md file</li>
+            <li>Watch the magic happen!</li>
+        </ol>
+    </div>
+</div>
+
+<script>
+// App name validation
+let validationTimeout;
+let appNameValid = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    const appNameInput = document.getElementById('app-name');
+    const validationMsg = document.getElementById('name-validation');
+    const downloadBtn = document.getElementById('download-btn');
+
+    appNameInput.addEventListener('input', function() {
+        clearTimeout(validationTimeout);
+        const appName = this.value.trim().toLowerCase();
+
+        // Reset validation
+        validationMsg.textContent = '';
+        validationMsg.className = 'validation-message';
+        appNameValid = false;
+        downloadBtn.disabled = true;
+
+        if (appName.length === 0) {
+            return;
+        }
+
+        // Client-side pattern validation
+        const pattern = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/;
+        if (!pattern.test(appName)) {
+            validationMsg.textContent = '❌ Invalid format. Use lowercase letters, numbers, and hyphens only.';
+            validationMsg.className = 'validation-message error';
+            return;
+        }
+
+        // Check minimum length
+        if (appName.length < 2) {
+            validationMsg.textContent = '❌ App name must be at least 2 characters.';
+            validationMsg.className = 'validation-message error';
+            return;
+        }
+
+        // Debounced server-side validation
+        validationMsg.textContent = '⏳ Checking availability...';
+        validationMsg.className = 'validation-message';
+
+        validationTimeout = setTimeout(async () => {
+            try {
+                const response = await fetch('/deploy/check-name', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({app_name: appName})
+                });
+
+                const data = await response.json();
+
+                if (data.available) {
+                    validationMsg.textContent = '✅ App name is available!';
+                    validationMsg.className = 'validation-message success';
+                    appNameValid = true;
+                    downloadBtn.disabled = false;
+                } else {
+                    validationMsg.textContent = '❌ ' + data.error;
+                    validationMsg.className = 'validation-message error';
+                    appNameValid = false;
+                    downloadBtn.disabled = true;
+                }
+            } catch (error) {
+                validationMsg.textContent = '⚠️ Could not validate. Please try again.';
+                validationMsg.className = 'validation-message error';
+            }
+        }, 500); // 500ms debounce
+    });
+});
+
+async function downloadKit() {
+    const appName = document.getElementById('app-name').value.trim().toLowerCase();
+    const appType = document.getElementById('app-type').value;
+    const downloadBtn = document.getElementById('download-btn');
+
+    if (!appNameValid) {
+        alert('Please enter a valid app name first.');
+        return;
+    }
+
+    // Disable button during download
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = '⏳ Generating kit...';
+
+    try {
+        // Create form data
+        const formData = new FormData();
+        formData.append('app_name', appName);
+        formData.append('app_type', appType);
+
+        // Submit form
+        const response = await fetch('/deploy/download-kit', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Download failed');
+        }
+
+        // Get the blob and trigger download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `deployment-kit-${appName}-${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        // Success message
+        const msg = document.getElementById('status-message');
+        msg.className = 'message message-success';
+        msg.textContent = `✅ Deployment kit for "${appName}" downloaded successfully!`;
+        msg.style.display = 'block';
+
+        // Reset button
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = '⬇️ Download Deployment Kit';
+    } catch (error) {
+        alert('Error: ' + error.message);
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = '⬇️ Download Deployment Kit';
+    }
+}
+
+async function provisionAccess() {
+    const btn = document.getElementById('provision-btn');
+    const msg = document.getElementById('status-message');
+
+    btn.disabled = true;
+    btn.textContent = 'Provisioning...';
+
+    try {
+        const response = await fetch('/deploy/provision', { method: 'POST' });
+        const data = await response.json();
+
+        if (data.success) {
+            msg.className = 'message message-success';
+            msg.textContent = '✅ ' + data.message;
+            msg.style.display = 'block';
+            btn.style.display = 'none';
+            // Reload to update status
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            msg.className = 'message message-error';
+            msg.textContent = '❌ ' + data.message;
+            msg.style.display = 'block';
+            btn.disabled = false;
+            btn.textContent = 'Whitelist My IP';
+        }
+    } catch (error) {
+        msg.className = 'message message-error';
+        msg.textContent = '❌ Error: ' + error.message;
+        msg.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Whitelist My IP';
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Capsule Cloud{% endblock %}</title>
+    <link rel="stylesheet" href="/deploy/static/style.css">
+</head>
+<body>
+    <nav>
+        <div class="nav-brand">
+            <a href="/">🧊 Capsule</a>
+        </div>
+        <div class="nav-links">
+            <a href="/apps">Apps</a>
+            <a href="/deploy">Deploy</a>
+            <a href="/ssh">SSH</a>
+            <a href="/cloner">Cloner</a>
+            <a href="/docs">Docs</a>
+            <a href="/status">Status</a>
+        </div>
+        <div class="nav-user">
+            <span>{{ email }}</span>
+            <a href="/oauth2/sign_out" class="sign-out">Sign Out</a>
+        </div>
+    </nav>
+
+    {% if breadcrumbs %}
+    <div class="breadcrumbs">
+        {% for item in breadcrumbs %}
+            {% if item.url %}
+                <a href="{{ item.url }}">{{ item.name }}</a>
+            {% else %}
+                <span>{{ item.name }}</span>
+            {% endif %}
+            {% if not loop.last %} / {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="/docs">Documentation</a>
+                <span class="separator">·</span>
+                <a href="/status">System Status</a>
+                <span class="separator">·</span>
+                <a href="https://github.com">GitHub</a>
+            </div>
+            <div class="footer-info">
+                Powered by Capsule Cloud <span class="version">v1.0.0</span>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

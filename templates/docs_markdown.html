@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} - Capsule Cloud{% endblock %}
+
+{% block content %}
+<div class="markdown-container">
+    <div class="markdown-content">
+        <pre>{{ content }}</pre>
+    </div>
+</div>
+
+<style>
+.markdown-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.markdown-content {
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    padding: 40px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.markdown-content pre {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #24292e;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+/* Make ASCII diagrams more readable */
+.markdown-content pre {
+    letter-spacing: 0.05em;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .markdown-content {
+        padding: 20px;
+    }
+
+    .markdown-content pre {
+        font-size: 11px;
+        line-height: 1.4;
+    }
+}
+
+/* Print styles */
+@media print {
+    .markdown-content pre {
+        font-size: 10px;
+        line-height: 1.4;
+    }
+}
+
+/* Add spacing for better readability */
+.markdown-content {
+    tab-size: 4;
+}
+
+/* Ensure long lines don't break layout */
+.markdown-content {
+    overflow-x: auto;
+}
+</style>
+{% endblock %}

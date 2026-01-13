@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}Your Apps - Capsule Cloud{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="section-header">
+        <div>
+            <h1>📦 Your Apps</h1>
+            <p style="color: #888; margin-top: 5px;">View and manage your deployed applications</p>
+        </div>
+        <a href="/deploy/" class="btn btn-primary">+ Deploy New App</a>
+    </div>
+
+    {% if apps and apps|length > 0 %}
+    <div class="stats-grid" style="margin-bottom: 30px;">
+        <div class="stat-card">
+            <div class="stat-value">{{ apps|length }}</div>
+            <div class="stat-label">Total Apps</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ running_count }}</div>
+            <div class="stat-label">Running</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ stopped_count }}</div>
+            <div class="stat-label">Stopped</div>
+        </div>
+    </div>
+
+    <div class="apps-grid">
+        {% for app in apps %}
+        <div class="card app-card">
+            <div class="app-card-header">
+                <div>
+                    <h3 style="margin: 0; font-size: 20px;">{{ app.name }}</h3>
+                    <p style="color: #888; margin: 5px 0 0 0; font-size: 14px;">{{ app.path }}</p>
+                </div>
+                <span class="status-badge {{ app.status }}">{{ app.status|upper }}</span>
+            </div>
+
+            <div class="app-card-details">
+                {% if app.created_at %}
+                <div class="detail-row">
+                    <span class="detail-label">📅 Created:</span>
+                    <span>{{ app.created_at }}</span>
+                </div>
+                {% endif %}
+
+                {% if app.last_modified %}
+                <div class="detail-row">
+                    <span class="detail-label">🕒 Modified:</span>
+                    <span>{{ app.last_modified }}</span>
+                </div>
+                {% endif %}
+
+                {% if app.url %}
+                <div class="detail-row">
+                    <span class="detail-label">🌐 URL:</span>
+                    <a href="{{ app.url }}" target="_blank" style="color: #60a5fa;">{{ app.url }}</a>
+                </div>
+                {% endif %}
+
+                {% if app.services %}
+                <div class="detail-row">
+                    <span class="detail-label">🔧 Services:</span>
+                    <span>{{ app.services|join(', ') }}</span>
+                </div>
+                {% endif %}
+
+                {% if app.ports %}
+                <div class="detail-row">
+                    <span class="detail-label">🔌 Ports:</span>
+                    <span>{{ app.ports|join(', ') }}</span>
+                </div>
+                {% endif %}
+
+                {% if app.has_docker_compose %}
+                <div class="detail-row">
+                    <span class="detail-label">📦 Type:</span>
+                    <span>Docker Compose</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="app-card-actions">
+                {% if app.url %}
+                <a href="{{ app.url }}" target="_blank" class="btn btn-secondary btn-sm">Open App</a>
+                {% endif %}
+                <button onclick="viewLogs('{{ app.name }}')" class="btn btn-secondary btn-sm">View Logs</button>
+                <button onclick="deleteApp('{{ app.name }}')" class="btn btn-danger btn-sm">Delete</button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card" style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 64px; margin-bottom: 20px;">📦</div>
+        <h2 style="margin-bottom: 15px;">No Apps Deployed Yet</h2>
+        <p style="color: #888; margin-bottom: 30px;">
+            Get started by deploying your first application using the Deploy Portal.
+        </p>
+        <a href="/deploy/" class="btn btn-primary">Deploy Your First App</a>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.apps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 20px;
+}
+
+.app-card {
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    transition: all 0.3s ease;
+}
+
+.app-card:hover {
+    border-color: rgba(96, 165, 250, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+.app-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(96, 165, 250, 0.2);
+}
+
+.app-card-details {
+    margin-bottom: 20px;
+}
+
+.detail-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.detail-label {
+    min-width: 100px;
+    color: #888;
+}
+
+.app-card-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+.btn-danger {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.stat-card {
+    background: rgba(96, 165, 250, 0.05);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 36px;
+    font-weight: bold;
+    color: #60a5fa;
+    margin-bottom: 5px;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #888;
+}
+
+.status-badge.running {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+}
+
+.status-badge.stopped {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+}
+
+.status-badge.unknown {
+    background: rgba(156, 163, 175, 0.2);
+    color: #9ca3af;
+}
+</style>
+
+<script>
+function viewLogs(appName) {
+    alert('View logs for ' + appName + '\n\nThis will show docker-compose logs in a future update.');
+    // TODO: Implement logs viewer
+}
+
+function deleteApp(appName) {
+    // Confirmation dialog
+    const confirmed = confirm(
+        '⚠️ Delete "' + appName + '"?\n\n' +
+        'This will:\n' +
+        '• Stop and remove all Docker containers\n' +
+        '• Delete all app files and data\n' +
+        '• Remove from registry\n\n' +
+        'This action cannot be undone!\n\n' +
+        'Are you sure you want to continue?'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    // Show loading state
+    const deleteBtn = event.target;
+    const originalText = deleteBtn.textContent;
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = 'Deleting...';
+
+    // Call delete API
+    fetch('/apps/delete/' + appName, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        credentials: 'same-origin'  // Include cookies for authentication
+    })
+    .then(response => {
+        // Check if response is JSON before parsing
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response. You may need to refresh the page and try again.');
+        }
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('✅ Successfully deleted "' + appName + '"\n\n' +
+                  'The app has been removed. The page will reload.');
+            // Reload the page to show updated list
+            window.location.reload();
+        } else {
+            alert('❌ Failed to delete "' + appName + '"\n\n' + data.message);
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = originalText;
+        }
+    })
+    .catch(error => {
+        alert('❌ Error deleting app\n\n' + error.message);
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = originalText;
+    });
+}
+</script>
+{% endblock %}

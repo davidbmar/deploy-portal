@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Keys - NEVER commit these
+keys/
+*.pem
+*.key
+
+# Data - Application state (not in version control)
+data/
+*.json
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flask
+instance/
+.webassets-cache
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Deployment artifacts
+deployment-kit-*.zip

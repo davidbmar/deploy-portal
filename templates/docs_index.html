@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}Documentation - Capsule Cloud{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>📚 Documentation</h1>
+    <p class="subtitle">Complete guides for deploying and managing your applications</p>
+
+    <div class="docs-grid">
+        <div class="doc-card">
+            <h2>🏗️ Architecture Overview</h2>
+            <p>Comprehensive visual diagrams showing how AWS Cognito, nginx, oauth2-proxy, and your applications work together.</p>
+            <ul>
+                <li>Authentication flow (step-by-step)</li>
+                <li>Component interaction diagrams</li>
+                <li>Network security layers</li>
+                <li>Deployment architecture</li>
+            </ul>
+            <a href="/docs/architecture" class="btn btn-primary">View Architecture</a>
+        </div>
+
+        <div class="doc-card">
+            <h2>💻 Mac Deployment Guide</h2>
+            <p>Step-by-step instructions for deploying applications from your Mac using Claude Code.</p>
+            <ul>
+                <li>Download & extract deployment kit</li>
+                <li>Set up file structure</li>
+                <li>Use Claude Code to deploy</li>
+                <li>Troubleshooting tips</li>
+            </ul>
+            <a href="/docs/mac-deployment" class="btn btn-primary">Mac Setup Guide</a>
+        </div>
+
+        <div class="doc-card">
+            <h2>🚀 Quick Start</h2>
+            <p>Get up and running in 5 minutes</p>
+            <ol style="text-align: left; padding-left: 20px;">
+                <li>Go to <a href="/deploy">Deploy</a> page</li>
+                <li>Enter your app name</li>
+                <li>Download deployment kit</li>
+                <li>Follow instructions in kit</li>
+                <li>Your app is live!</li>
+            </ol>
+            <a href="/deploy" class="btn btn-primary">Start Deploying</a>
+        </div>
+
+        <div class="doc-card">
+            <h2>📖 User Guide</h2>
+            <p>How to use Capsule Cloud effectively</p>
+            <ul>
+                <li>Understanding the deployment process</li>
+                <li>Managing your applications</li>
+                <li>Viewing logs and monitoring</li>
+                <li>SSH access and terminal</li>
+            </ul>
+            <a href="/docs/user-guide" class="btn btn-secondary">Coming Soon</a>
+        </div>
+
+        <div class="doc-card">
+            <h2>🔐 Security</h2>
+            <p>Learn about the security model</p>
+            <ul>
+                <li>AWS Cognito authentication</li>
+                <li>OAuth2 + PKCE flow</li>
+                <li>TLS/SSL encryption</li>
+                <li>Dynamic IP whitelisting</li>
+            </ul>
+            <a href="/docs/architecture#security-layers" class="btn btn-primary">Security Details</a>
+        </div>
+
+        <div class="doc-card">
+            <h2>🛠️ Troubleshooting</h2>
+            <p>Common issues and solutions</p>
+            <ul>
+                <li>Deployment failures</li>
+                <li>Connection problems</li>
+                <li>Application errors</li>
+                <li>SSH issues</li>
+            </ul>
+            <a href="/docs/troubleshooting" class="btn btn-secondary">Coming Soon</a>
+        </div>
+    </div>
+
+    <div class="info-box" style="margin-top: 40px;">
+        <h3>💡 Need Help?</h3>
+        <p>Can't find what you're looking for? Check out these resources:</p>
+        <ul>
+            <li><a href="/status">System Status</a> - Check if all services are running</li>
+            <li><a href="/deploy/activity">Activity Logs</a> - See recent deployment activity</li>
+            <li><a href="/apps">Your Apps</a> - Manage deployed applications</li>
+        </ul>
+    </div>
+</div>
+
+<style>
+.docs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 25px;
+    margin-top: 30px;
+}
+
+.doc-card {
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    padding: 25px;
+    transition: all 0.2s ease;
+}
+
+.doc-card:hover {
+    border-color: #0366d6;
+    box-shadow: 0 4px 12px rgba(3, 102, 214, 0.15);
+    transform: translateY(-2px);
+}
+
+.doc-card h2 {
+    margin-top: 0;
+    font-size: 1.4em;
+    color: #24292e;
+}
+
+.doc-card p {
+    color: #586069;
+    margin: 15px 0;
+}
+
+.doc-card ul, .doc-card ol {
+    color: #586069;
+    margin: 15px 0;
+    line-height: 1.8;
+}
+
+.doc-card li {
+    margin: 8px 0;
+}
+
+.btn {
+    display: inline-block;
+    padding: 10px 20px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    margin-top: 15px;
+    transition: all 0.2s ease;
+}
+
+.btn-primary {
+    background: #0366d6;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #0256c7;
+    transform: scale(1.05);
+}
+
+.btn-secondary {
+    background: #f6f8fa;
+    color: #586069;
+    border: 1px solid #e1e4e8;
+}
+
+.btn-secondary:hover {
+    background: #e1e4e8;
+}
+
+.info-box {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    padding: 25px;
+}
+
+.info-box h3 {
+    margin-top: 0;
+    color: #24292e;
+}
+
+.info-box ul {
+    margin: 15px 0;
+    padding-left: 25px;
+}
+
+.info-box li {
+    margin: 10px 0;
+}
+
+.info-box a {
+    color: #0366d6;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.info-box a:hover {
+    text-decoration: underline;
+}
+
+.subtitle {
+    color: #586069;
+    font-size: 1.1em;
+    margin-top: -10px;
+    margin-bottom: 30px;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Activity Log - Deploy Portal{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>📊 Activity Log</h1>
+
+    <div class="card">
+        <div class="activity-header">
+            <span class="live-indicator" id="live-indicator">● Live</span>
+            <button class="btn btn-secondary" onclick="refreshLogs()">Refresh</button>
+        </div>
+
+        <div id="activity-log" class="activity-log">
+            <div class="loading">Loading activity...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+let eventSource = null;
+
+async function loadLogs() {
+    try {
+        const response = await fetch('/deploy/api/activity');
+        const logs = await response.json();
+        renderLogs(logs);
+    } catch (error) {
+        console.error('Error loading logs:', error);
+    }
+}
+
+function renderLogs(logs) {
+    const container = document.getElementById('activity-log');
+
+    if (logs.length === 0) {
+        container.innerHTML = '<div class="no-activity">No activity recorded yet</div>';
+        return;
+    }
+
+    // Clear container first
+    container.innerHTML = '';
+
+    // Use DOM methods to safely build log entries
+    logs.forEach(log => {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'log-entry';
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'log-time';
+        timeSpan.textContent = log.timestamp;
+
+        const userSpan = document.createElement('span');
+        userSpan.className = 'log-user';
+        userSpan.textContent = log.user;
+
+        const contentSpan = document.createElement('span');
+        contentSpan.className = 'log-content';
+        contentSpan.textContent = log.content;
+
+        logEntry.appendChild(timeSpan);
+        logEntry.appendChild(userSpan);
+        logEntry.appendChild(contentSpan);
+        container.appendChild(logEntry);
+    });
+}
+
+function refreshLogs() {
+    loadLogs();
+}
+
+function startLiveUpdates() {
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    eventSource = new EventSource('/deploy/api/activity/stream');
+
+    eventSource.onmessage = function(event) {
+        const logs = JSON.parse(event.data);
+        renderLogs(logs);
+    };
+
+    eventSource.onerror = function() {
+        document.getElementById('live-indicator').textContent = '○ Disconnected';
+        document.getElementById('live-indicator').style.color = '#999';
+    };
+
+    eventSource.onopen = function() {
+        document.getElementById('live-indicator').textContent = '● Live';
+        document.getElementById('live-indicator').style.color = '#22c55e';
+    };
+}
+
+// Initial load
+loadLogs();
+
+// Start live updates
+startLiveUpdates();
+
+// Fallback polling if SSE fails
+setInterval(loadLogs, 10000);
+</script>
+{% endblock %}

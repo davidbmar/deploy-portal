@@ -84,29 +84,31 @@
 
     <div class="card">
         <h2>⚡ What to Do After Download</h2>
-        <ol style="font-size: 1.1em; line-height: 2;">
-            <li>Copy the <code>deployment-kit-*.zip</code> file into your project directory</li>
-            <li>Unzip it: <code>unzip deployment-kit-*.zip</code></li>
-            <li>Follow the instructions contained within the kit</li>
-        </ol>
+
+        <div style="background: #e7f3ff; padding: 20px; border-radius: 8px; border-left: 4px solid #0366d6; margin: 20px 0;">
+            <p style="font-size: 1.2em; margin: 0;">
+                <strong>Using Claude Code?</strong> Just tell Claude:<br>
+                <code style="font-size: 1.1em; background: white; padding: 8px 12px; border-radius: 4px; display: inline-block; margin-top: 10px;">
+                    "Unzip this deployment kit and follow the instructions"
+                </code>
+            </p>
+        </div>
 
         <p style="margin-top: 20px;">
-            The deployment kit contains everything you need, including:
+            <strong>Or do it manually:</strong>
         </p>
-        <ul style="line-height: 1.8;">
-            <li>🔑 SSH key for server access</li>
-            <li>📝 <strong>CLAUDE_PROMPT.txt</strong> - Paste this into Claude Code to deploy automatically</li>
-            <li>📖 <strong>DEPLOY_INSTRUCTIONS.md</strong> - Complete step-by-step guide</li>
-            <li>⚙️ Configuration files for your app</li>
-        </ul>
+        <ol style="font-size: 1.1em; line-height: 2;">
+            <li>Unzip the file: <code>unzip deployment-kit-*.zip</code></li>
+            <li>Follow the instructions in <code>DEPLOY_INSTRUCTIONS.md</code></li>
+        </ol>
 
-        <div style="background: #e7f3ff; padding: 15px; border-radius: 6px; border-left: 4px solid #0366d6; margin-top: 20px;">
-            <strong>💡 Quick Tip:</strong> If using Claude Code, just open the extracted folder in your terminal and paste the contents of <code>CLAUDE_PROMPT.txt</code> - Claude will handle everything!
-        </div>
+        <p style="margin-top: 20px; color: #586069;">
+            The kit contains: SSH key, deployment instructions, and Claude Code prompt.
+        </p>
 
         <div style="margin-top: 20px;">
             <a href="/docs/mac-deployment" class="btn btn-secondary" style="text-decoration: none;">
-                📖 Need More Help? View Detailed Guide
+                📖 View Detailed Guide
             </a>
         </div>
     </div>

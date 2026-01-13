@@ -853,77 +853,63 @@ chmod 600 /path/to/this/directory/capsule-deploy.pem
 
 def delete_app(app_name):
     """Delete a deployed app and clean up all configurations"""
-    deployment_path = os.path.join(Config.DEPLOYMENT_ROOT, app_name)
-
-    if not os.path.exists(deployment_path):
-        return False, f"App '{app_name}' not found"
-
-    # Validate app name to prevent directory traversal
-    if '..' in app_name or '/' in app_name:
+    # Validate app name to prevent directory traversal and command injection
+    if not app_name or '..' in app_name or '/' in app_name or not re.match(r'^[a-z0-9][a-z0-9-]{0,62}$', app_name):
         return False, "Invalid app name"
 
     try:
-        # Step 1: Stop and remove docker containers
-        docker_compose_path = os.path.join(deployment_path, 'docker-compose.yml')
-        if os.path.exists(docker_compose_path):
-            try:
-                import subprocess
-                # Stop and remove containers, networks, volumes
-                subprocess.run(
-                    ['docker-compose', 'down', '-v'],
-                    cwd=deployment_path,
-                    capture_output=True,
-                    timeout=30
-                )
-            except Exception as e:
-                print(f"Warning: Failed to stop docker containers: {e}")
+        import subprocess
 
-        # Step 2: Remove from deployment registry
-        registry_path = Config.REGISTRY_FILE
-        if os.path.exists(registry_path):
-            try:
-                with open(registry_path, 'r') as f:
-                    registry = json.load(f)
-                if app_name in registry:
-                    del registry[app_name]
-                    with open(registry_path, 'w') as f:
-                        json.dump(registry, f, indent=2)
-            except Exception as e:
-                print(f"Warning: Failed to update registry: {e}")
+        # Get path to cleanup script
+        script_path = os.path.join(os.path.dirname(__file__), 'scripts', 'delete_deployment.sh')
 
-        # Step 3: Remove nginx configuration
-        # Note: This requires manual nginx reload, we'll document what needs to be done
-        nginx_cleanup_notes = f"""
-To complete nginx cleanup, run on server:
-sudo sed -i '/# {app_name} upstream/,/^$/d' /etc/nginx/sites-available/auth-gateway
-sudo sed -i '/# Protected: {app_name}/,/location = \\/{app_name}/d' /etc/nginx/sites-available/auth-gateway
-sudo nginx -t && sudo systemctl reload nginx
-"""
+        if not os.path.exists(script_path):
+            return False, f"Cleanup script not found at {script_path}"
 
-        # Step 4: Stop systemd service if exists
-        try:
-            import subprocess
-            subprocess.run(
-                ['sudo', 'systemctl', 'stop', f'{app_name}.service'],
-                capture_output=True,
-                timeout=10
-            )
-            subprocess.run(
-                ['sudo', 'systemctl', 'disable', f'{app_name}.service'],
-                capture_output=True,
-                timeout=10
-            )
-        except Exception as e:
-            print(f"Warning: Failed to stop systemd service: {e}")
+        # Execute comprehensive cleanup script
+        result = subprocess.run(
+            ['/bin/bash', script_path, app_name],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
 
-        # Step 5: Remove app directory
-        import shutil
-        shutil.rmtree(deployment_path)
+        # Parse output
+        stdout = result.stdout
+        stderr = result.stderr
 
-        return True, f"App '{app_name}' deleted successfully. {nginx_cleanup_notes}"
+        if result.returncode == 0:
+            # Extract log file path from output
+            log_file = None
+            for line in stdout.split('\n'):
+                if 'Cleanup log:' in line:
+                    log_file = line.split('Cleanup log:')[1].strip()
+                    break
 
+            success_msg = f"App '{app_name}' deleted successfully."
+            if log_file:
+                success_msg += f"\n\nCleanup log: {log_file}"
+
+            # Show summary from script output
+            if '===============================================' in stdout:
+                summary_start = stdout.find('Cleanup Summary')
+                if summary_start > 0:
+                    summary = stdout[summary_start:]
+                    success_msg += f"\n\n{summary}"
+
+            return True, success_msg
+        else:
+            error_msg = f"Cleanup script failed (exit code {result.returncode})"
+            if stderr:
+                error_msg += f"\n\nErrors:\n{stderr}"
+            if stdout:
+                error_msg += f"\n\nOutput:\n{stdout[-500:]}"  # Last 500 chars
+            return False, error_msg
+
+    except subprocess.TimeoutExpired:
+        return False, "Cleanup script timed out after 5 minutes"
     except Exception as e:
-        return False, f"Failed to delete app: {str(e)}"
+        return False, f"Failed to execute cleanup: {str(e)}"
 
 def scan_deployed_apps():
     """Scan the deployments directory and return info about all deployed apps"""

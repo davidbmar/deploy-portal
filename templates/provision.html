@@ -83,15 +83,68 @@
     </div>
 
     <div class="card">
-        <h2>⚡ Quick Start</h2>
-        <ol>
-            <li>Click "Download Deployment Kit"</li>
-            <li>Extract the zip file</li>
-            <li>Run <code>chmod 600 capsule-deploy.pem</code></li>
-            <li>Open Claude Code in your project directory</li>
-            <li>Give Claude the CLAUDE_PROMPT.md file</li>
-            <li>Watch the magic happen!</li>
+        <h2>⚡ Quick Start - What to Do After Download</h2>
+
+        <h3 style="margin-top: 20px;">📍 Step 1: Extract to the Right Location</h3>
+        <p><strong>IMPORTANT:</strong> Extract to a location Claude Code can access.</p>
+
+        <div style="background: #f6f8fa; padding: 15px; border-radius: 6px; margin: 10px 0;">
+            <strong>On Mac:</strong>
+            <pre style="margin: 10px 0; padding: 10px; background: #fff; border: 1px solid #e1e4e8; border-radius: 4px;">
+# Create projects folder (if you don't have one)
+mkdir -p ~/Documents/claude-projects
+
+# Move the downloaded ZIP there
+mv ~/Downloads/deployment-kit-*.zip ~/Documents/claude-projects/
+
+# Navigate and extract
+cd ~/Documents/claude-projects
+unzip deployment-kit-*.zip
+cd your-app-name/</pre>
+
+            <strong>On Linux/Windows:</strong>
+            <pre style="margin: 10px 0; padding: 10px; background: #fff; border: 1px solid #e1e4e8; border-radius: 4px;">
+# Extract to your projects directory
+mkdir -p ~/projects/claude-projects
+mv ~/Downloads/deployment-kit-*.zip ~/projects/claude-projects/
+cd ~/projects/claude-projects
+unzip deployment-kit-*.zip
+cd your-app-name/</pre>
+        </div>
+
+        <h3 style="margin-top: 20px;">🤖 Step 2: Deploy with Claude Code</h3>
+        <ol style="line-height: 1.8;">
+            <li><strong>Open terminal in the extracted folder:</strong>
+                <pre style="margin: 5px 0 10px 20px; padding: 10px; background: #f6f8fa; border-radius: 4px;">cd ~/Documents/claude-projects/your-app-name</pre>
+            </li>
+            <li><strong>Start Claude Code:</strong>
+                <pre style="margin: 5px 0 10px 20px; padding: 10px; background: #f6f8fa; border-radius: 4px;">claude-code</pre>
+            </li>
+            <li><strong>Copy the deployment prompt:</strong>
+                <pre style="margin: 5px 0 10px 20px; padding: 10px; background: #f6f8fa; border-radius: 4px;">cat CLAUDE_PROMPT.txt</pre>
+                Then copy ALL the text and paste it into Claude Code.
+            </li>
+            <li><strong>Press Enter</strong> and let Claude deploy your app automatically! 🚀</li>
         </ol>
+
+        <h3 style="margin-top: 20px;">📦 What's in the Kit?</h3>
+        <ul style="line-height: 1.8;">
+            <li><code>deploy-key.pem</code> - SSH private key (keep secure!)</li>
+            <li><code>CLAUDE_PROMPT.txt</code> - Ready-to-paste instructions for Claude</li>
+            <li><code>DEPLOY_INSTRUCTIONS.md</code> - Human-readable deployment guide</li>
+            <li><code>app-config.json</code> - Your app configuration details</li>
+            <li><code>README.md</code> - Quick overview</li>
+        </ul>
+
+        <div style="background: #fff3cd; padding: 15px; border-radius: 6px; border-left: 4px solid #ffc107; margin-top: 20px;">
+            <strong>💡 Pro Tip:</strong> The kit includes everything. Just extract, navigate to the folder in your terminal, start Claude Code, and paste the CLAUDE_PROMPT.txt contents. Claude will handle SSH connection, file uploads, port allocation, nginx configuration, and deployment!
+        </div>
+
+        <div style="margin-top: 20px;">
+            <a href="/docs/mac-deployment" class="btn btn-secondary" style="text-decoration: none;">
+                📖 View Detailed Step-by-Step Guide
+            </a>
+        </div>
     </div>
 </div>
 

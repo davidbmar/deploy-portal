@@ -117,29 +117,69 @@ deploy-portal/
 
 ## 🚀 Ready to Push to GitHub
 
-### Step 1: Initialize Git (if needed)
+### Step 1: Create Repository on GitHub Website FIRST
 
-The project is currently part of a parent git repository. To make it independent:
+**You MUST do this before running git commands!**
+
+1. **Go to**: https://github.com/new
+
+2. **Fill in**:
+   - Repository name: `deploy-portal`
+   - Description: "Self-service deployment portal for EC2 with AWS Cognito authentication"
+   - Visibility: Choose **Public** or **Private**
+
+3. **IMPORTANT - Leave UNCHECKED**:
+   - ❌ Do NOT check "Add a README file"
+   - ❌ Do NOT check "Add .gitignore"
+   - ❌ Do NOT select a license
+
+   *(We already have these files)*
+
+4. **Click "Create repository"**
+
+5. **Copy the repository URL** that GitHub shows you:
+   ```
+   https://github.com/YOUR_USERNAME/deploy-portal.git
+   ```
+
+### Step 2: Get Your GitHub Personal Access Token
+
+**You need a token to push code (not your password!)**
+
+1. **Go to**: https://github.com/settings/tokens
+
+2. **Click**: "Generate new token" → "Generate new token (classic)"
+
+3. **Fill in**:
+   - Note: "Deploy Portal Push Access"
+   - Expiration: 90 days (or your choice)
+   - Scopes: Check **`repo`** (gives full control of private repositories)
+
+4. **Click** "Generate token"
+
+5. **COPY THE TOKEN IMMEDIATELY** (you won't see it again!)
+   - It looks like: `ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+   - Save it somewhere temporarily (you'll use it in Step 4)
+
+### Step 3: Initialize Git and Commit Locally
 
 ```bash
 cd /home/ubuntu/src/deploy-portal
 
-# Remove from parent repo tracking
-git rm -r --cached .
+# Configure git (if not done already)
+git config --global user.email "your-email@example.com"
+git config --global user.name "Your Name"
 
-# Initialize as new repo
+# Initialize as new repo (if not done)
 git init
 
 # Add all files
 git add .
 
-# Check what will be committed
+# Check what will be committed (should see all your files)
 git status
-```
 
-### Step 2: Create Initial Commit
-
-```bash
+# Create initial commit
 git commit -m "Initial commit: Deploy Portal
 
 - Flask-based self-service deployment portal
@@ -152,33 +192,113 @@ git commit -m "Initial commit: Deploy Portal
 - Ready for production use"
 ```
 
-### Step 3: Create GitHub Repository
+### Step 4: Connect to GitHub and Push
 
-1. Go to https://github.com/new
-2. Repository name: `deploy-portal`
-3. Description: "Self-service deployment portal for EC2 with AWS Cognito authentication"
-4. Visibility: Public or Private (your choice)
-5. **DO NOT** initialize with README, .gitignore, or license (we already have them)
-6. Click "Create repository"
-
-### Step 4: Push to GitHub
+**Replace `YOUR_TOKEN` with the token you copied in Step 2**
+**Replace `YOUR_USERNAME` with your GitHub username**
 
 ```bash
-# Add remote
-git remote add origin https://github.com/YOUR_USERNAME/deploy-portal.git
+# Add the GitHub remote (use YOUR token and username!)
+git remote add origin https://YOUR_TOKEN@github.com/YOUR_USERNAME/deploy-portal.git
 
-# Push main branch
+# Example with fake token:
+# git remote add origin https://ghp_abc123xyz789FAKE@github.com/davidbmar/deploy-portal.git
+
+# Verify remote was added
+git remote -v
+
+# You should see something like:
+# origin  https://ghp_xxx...@github.com/YOUR_USERNAME/deploy-portal.git (fetch)
+# origin  https://ghp_xxx...@github.com/YOUR_USERNAME/deploy-portal.git (push)
+
+# Set branch to main
 git branch -M main
+
+# Push to GitHub
 git push -u origin main
+```
+
+**Expected output if successful**:
+```
+Enumerating objects: 45, done.
+Counting objects: 100% (45/45), done.
+Delta compression using up to 2 threads
+Compressing objects: 100% (40/40), done.
+Writing objects: 100% (45/45), 89.23 KiB | 2.97 MiB/s, done.
+Total 45 (delta 12), reused 0 (delta 0), pack-reused 0
+remote: Resolving deltas: 100% (12/12), done.
+To https://github.com/YOUR_USERNAME/deploy-portal.git
+ * [new branch]      main -> main
+Branch 'main' set up to track remote branch 'main' from 'origin'.
 ```
 
 ### Step 5: Verify on GitHub
 
-Check that:
-- ✅ All files are present
-- ✅ README displays properly
-- ✅ No secrets are visible
-- ✅ .gitignore is working (no keys/, data/, logs/ in repo)
+1. **Visit**: `https://github.com/YOUR_USERNAME/deploy-portal`
+
+2. **Check that**:
+   - ✅ All files are present
+   - ✅ README.md displays properly on the main page
+   - ✅ No secrets are visible (no files from `keys/`, `data/`, `logs/`)
+   - ✅ .gitignore is working correctly
+
+### Troubleshooting
+
+#### Error: "fatal: 'origin' does not appear to be a git repository"
+
+**Problem**: Remote wasn't added correctly or token is wrong
+
+**Fix**:
+```bash
+# Remove bad remote
+git remote remove origin
+
+# Add it again with correct token and username
+git remote add origin https://YOUR_TOKEN@github.com/YOUR_USERNAME/deploy-portal.git
+
+# Verify it was added
+git remote -v
+
+# Try pushing again
+git push -u origin main
+```
+
+#### Error: "fatal: repository not found" or "403 Forbidden"
+
+**Problem**: Either the GitHub repository doesn't exist, or your token doesn't have permissions
+
+**Fix**:
+1. Make sure you created the repository on GitHub (Step 1)
+2. Check your token has `repo` scope
+3. Verify your username is correct in the URL
+
+#### Error: "Updates were rejected because the remote contains work..."
+
+**Problem**: The GitHub repo has files (README, etc.) you didn't check off
+
+**Fix**:
+```bash
+# Force push (only safe on new repo!)
+git push -u origin main --force
+```
+
+Or recreate the GitHub repository, making sure NOT to initialize it with any files.
+
+#### Token Security
+
+**After successfully pushing**:
+
+1. Clear your bash history to remove the token:
+   ```bash
+   history -c
+   history -w
+   ```
+
+2. Or use SSH instead for future pushes:
+   ```bash
+   # Change remote to SSH (no token needed)
+   git remote set-url origin git@github.com:YOUR_USERNAME/deploy-portal.git
+   ```
 
 ## 📋 Pre-Push Checklist
 

@@ -213,10 +213,11 @@ PORT=8000
 # PORT=5001
 """
 
-def generate_app_deployment_kit(email, ip, app_name, app_type):
+def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new'):
     """Generate app-specific deployment kit with automation instructions"""
     instance_ip = Config.get_instance_ip()
     timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    is_update = deploy_mode == 'update'
 
     # Read the SSH private key
     try:
@@ -270,15 +271,34 @@ If you have issues connecting, ensure:
     # Generate API key for dashboard (if needed for multi-service apps)
     dashboard_api_key = os.urandom(32).hex()
 
-    # App-specific CLAUDE_PROMPT.md with improved template
-    claude_prompt = f"""# Deploy {app_name} to Cloud
+    # Mode-specific header
+    if is_update:
+        mode_header = f"""# Update {app_name} on Cloud
+
+I need you to **UPDATE** an existing deployment. The app is already running on the server.
+
+## 🔄 UPDATE MODE - Quick Steps
+
+1. Fix SSH key permissions: `chmod 600 capsule-deploy.pem`
+2. Sync your changes to the server (rsync command below)
+3. Rebuild and restart containers: `docker-compose up -d --build`
+
+**This is an UPDATE** - nginx and other server configs are already set up. Just sync code and restart."""
+    else:
+        mode_header = f"""# Deploy {app_name} to Cloud
 
 I need you to deploy this project to our cloud server with automated setup.
+
+**This is a NEW DEPLOYMENT** - follow all steps including nginx configuration."""
+
+    # App-specific CLAUDE_PROMPT.md with improved template
+    claude_prompt = f"""{mode_header}
 
 ## Application Details
 
 - **App Name**: {app_name}
 - **App Type**: {app_type}
+- **Deployment Mode**: {'🔄 UPDATE existing app' if is_update else '🆕 NEW deployment'}
 - **Target Directory**: `/home/{Config.EC2_USER}/deployments/{app_name}/`
 - **Public URL**: `https://{instance_ip}/{app_name}/` (after setup)
 
@@ -304,25 +324,24 @@ Before deploying, analyze:
 3. Does it have dependencies? (package.json, requirements.txt, go.mod)
 4. Any environment variables needed?
 5. Does it have a Dockerfile or docker-compose.yml?
-6. **NEW: Is this a Next.js app?** (Check for next.config.js)
-7. **NEW: Does this app have a separate API backend?** (Check for multiple services)
+6. Is this a Next.js app? (Check for next.config.js)
+7. Does this app have a separate API backend? (Check for multiple services)
 
 ### Step 3: Copy Project to Server
 
 ```bash
 # From your local machine (in project directory)
-rsync -avz --exclude 'node_modules' --exclude 'venv' --exclude '.git' --exclude '.next' --exclude '.env' -e "ssh -i capsule-deploy.pem" ./ {Config.EC2_USER}@{instance_ip}:~/deployments/{app_name}/
+rsync -avz --exclude 'node_modules' --exclude 'venv' --exclude '.git' --exclude '.next' -e "ssh -i capsule-deploy.pem" ./ {Config.EC2_USER}@{instance_ip}:~/deployments/{app_name}/
 ```
 
-**IMPORTANT:**
-- DO NOT copy .env files with secrets
-- DO NOT copy node_modules or venv directories
-- DO NOT copy build artifacts (.next, dist, build)
-- DO copy package.json, requirements.txt, go.mod, docker-compose.yml, etc.
+**Notes:**
+- .env files ARE copied (secrets are protected behind OAuth)
+- node_modules/venv are excluded (will be rebuilt on server)
+- Build artifacts (.next, dist, build) are excluded (will be rebuilt)
 
 ### Step 4: Check Server Prerequisites
 
-**NEW: Before deploying, ensure the server has required tools:**
+{'**⏭️ SKIP FOR UPDATES** - Prerequisites already verified.' if is_update else '**Before deploying, ensure the server has required tools:**'}
 
 ```bash
 ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
@@ -344,7 +363,7 @@ sudo usermod -aG docker {Config.EC2_USER}
 
 ### Step 5: Configure Application for Subpath Deployment
 
-**NEW: For Next.js Applications with Separate Backend:**
+{'**⏭️ SKIP FOR UPDATES** - Subpath configuration already done.' if is_update else '**For Next.js Applications with Separate Backend:**'}
 
 If this is a Next.js dashboard with a separate API backend, you MUST configure it for subpath deployment:
 
@@ -384,7 +403,7 @@ EOF
 
 ### Step 6: Handle Port Conflicts
 
-**NEW: Check for port conflicts before starting:**
+{'**⏭️ SKIP FOR UPDATES** - Ports already allocated.' if is_update else '**Check for port conflicts before starting:**'}
 
 ```bash
 # Check if ports are in use
@@ -429,7 +448,7 @@ sg docker -c 'docker-compose logs -f'
 
 ### Step 8: Configure Nginx for Authenticated Access
 
-**NEW: For multi-service apps (frontend + backend), you need TWO nginx locations:**
+{'**⏭️ SKIP THIS STEP FOR UPDATES** - Nginx is already configured for this app.' if is_update else '**For multi-service apps (frontend + backend), you need TWO nginx locations:**'}
 
 #### 8a. Create upstream definition
 
@@ -566,16 +585,11 @@ curl -k https://{instance_ip}/{app_name}/api/
 
 ## Important Rules
 
-1. **Secrets Management**
-   - DO NOT copy .env files directly
-   - ASK ME for any secret values (API keys, database passwords, etc.)
-   - Create .env files on the server with placeholder values first
-
-2. **Permissions**
+1. **Permissions**
    - ASK ME before running sudo commands
    - Use `sg docker -c '...'` for docker commands if permission issues occur
 
-3. **Documentation**
+2. **Documentation**
    - Document what you set up so I can maintain it later
    - Note any port changes, configuration modifications, etc.
 
@@ -674,6 +688,8 @@ After deployment, report back:
     config_json = json.dumps({
         'app_name': app_name,
         'app_type': app_type,
+        'deploy_mode': deploy_mode,
+        'is_update': is_update,
         'ec2_host': instance_ip,
         'ec2_user': Config.EC2_USER,
         'ssh_key_file': 'capsule-deploy.pem',
@@ -1193,16 +1209,24 @@ def provision():
 
 @app.route('/deploy/check-name', methods=['POST'])
 def check_app_name():
-    """Check if app name is available"""
+    """Check if app name is available or exists for update"""
     data = request.get_json()
     app_name = data.get('app_name', '').lower().strip()
 
     valid, error = validate_app_name(app_name)
 
     if not valid:
-        return jsonify({'available': False, 'error': error})
+        return jsonify({'available': False, 'exists': False, 'error': error})
 
-    return jsonify({'available': True})
+    # Check if app already exists in deployments
+    deployment_path = os.path.join(Config.DEPLOYMENT_ROOT, app_name)
+    app_exists = os.path.isdir(deployment_path)
+
+    return jsonify({
+        'available': True,
+        'exists': app_exists,
+        'deployment_path': deployment_path if app_exists else None
+    })
 
 @app.route('/deploy/download-kit', methods=['POST'])
 def download_kit():
@@ -1211,6 +1235,7 @@ def download_kit():
     # Get form data
     app_name = request.form.get('app_name', '').lower().strip()
     app_type = request.form.get('app_type', 'other')
+    deploy_mode = request.form.get('deploy_mode', 'new')  # 'new' or 'update'
 
     # Validate app name
     if not app_name:
@@ -1225,7 +1250,7 @@ def download_kit():
         whitelist_ip(ip, email)
 
     # Generate app-specific deployment kit
-    zip_buffer, error = generate_app_deployment_kit(email, ip, app_name, app_type)
+    zip_buffer, error = generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode)
 
     if error:
         return jsonify({'error': error}), 500

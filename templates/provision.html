@@ -45,6 +45,29 @@
                 <div id="name-validation" class="validation-message"></div>
             </div>
 
+            <div id="deployment-mode" class="form-group" style="display: none;">
+                <label>Deployment Mode</label>
+                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107; margin: 10px 0;">
+                    <p style="margin: 0 0 10px 0;"><strong>⚠️ This app already exists!</strong></p>
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="deploy_mode" value="update" checked />
+                            <span><strong>Update existing</strong> - Sync changes to the deployed app</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="deploy_mode" value="new" />
+                            <span><strong>New deployment</strong> - Deploy as a fresh instance</span>
+                        </label>
+                    </div>
+                </div>
+                <div style="margin-top: 10px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="always-update" />
+                        <small>Always default to updating existing apps</small>
+                    </label>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label for="app-type">App Type (optional)</label>
                 <select id="app-type" name="app_type">
@@ -118,11 +141,23 @@
 // App name validation
 let validationTimeout;
 let appNameValid = false;
+let appExists = false;
 
 document.addEventListener('DOMContentLoaded', function() {
     const appNameInput = document.getElementById('app-name');
     const validationMsg = document.getElementById('name-validation');
     const downloadBtn = document.getElementById('download-btn');
+    const deploymentModeDiv = document.getElementById('deployment-mode');
+    const alwaysUpdateCheckbox = document.getElementById('always-update');
+
+    // Load preference from localStorage
+    const alwaysUpdate = localStorage.getItem('deployPortal_alwaysUpdate') === 'true';
+    alwaysUpdateCheckbox.checked = alwaysUpdate;
+
+    // Save preference when changed
+    alwaysUpdateCheckbox.addEventListener('change', function() {
+        localStorage.setItem('deployPortal_alwaysUpdate', this.checked);
+    });
 
     appNameInput.addEventListener('input', function() {
         clearTimeout(validationTimeout);
@@ -132,7 +167,9 @@ document.addEventListener('DOMContentLoaded', function() {
         validationMsg.textContent = '';
         validationMsg.className = 'validation-message';
         appNameValid = false;
+        appExists = false;
         downloadBtn.disabled = true;
+        deploymentModeDiv.style.display = 'none';
 
         if (appName.length === 0) {
             return;
@@ -168,10 +205,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
 
                 if (data.available) {
-                    validationMsg.textContent = '✅ App name is available!';
-                    validationMsg.className = 'validation-message success';
                     appNameValid = true;
                     downloadBtn.disabled = false;
+
+                    if (data.exists) {
+                        // App exists - show update options
+                        appExists = true;
+                        validationMsg.textContent = '🔄 App exists - ready to update!';
+                        validationMsg.className = 'validation-message success';
+                        deploymentModeDiv.style.display = 'block';
+
+                        // Auto-select update if preference is set
+                        if (localStorage.getItem('deployPortal_alwaysUpdate') === 'true') {
+                            document.querySelector('input[name="deploy_mode"][value="update"]').checked = true;
+                        }
+                    } else {
+                        // New app
+                        validationMsg.textContent = '✅ App name is available!';
+                        validationMsg.className = 'validation-message success';
+                        deploymentModeDiv.style.display = 'none';
+                    }
                 } else {
                     validationMsg.textContent = '❌ ' + data.error;
                     validationMsg.className = 'validation-message error';
@@ -196,6 +249,13 @@ async function downloadKit() {
         return;
     }
 
+    // Get deployment mode (update vs new)
+    let deployMode = 'new';
+    if (appExists) {
+        const selectedMode = document.querySelector('input[name="deploy_mode"]:checked');
+        deployMode = selectedMode ? selectedMode.value : 'update';
+    }
+
     // Disable button during download
     downloadBtn.disabled = true;
     downloadBtn.textContent = '⏳ Generating kit...';
@@ -205,6 +265,7 @@ async function downloadKit() {
         const formData = new FormData();
         formData.append('app_name', appName);
         formData.append('app_type', appType);
+        formData.append('deploy_mode', deployMode);
 
         // Submit form
         const response = await fetch('/deploy/download-kit', {

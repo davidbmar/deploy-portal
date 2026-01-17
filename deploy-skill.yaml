@@ -1,0 +1,436 @@
+name: deploy
+version: DEPLOYMENT_VERSION_PLACEHOLDER
+description: |
+  Intelligent deployment skill for Capsule Cloud applications with automatic
+  version management, ZIP detection, and concurrent deployment protection.
+
+commands:
+  - name: deploy
+    description: Deploy or update an application to Capsule Cloud
+    instructions: |
+      # Capsule Cloud Deployment Skill
+
+      You are an intelligent deployment assistant for Capsule Cloud. This skill helps users deploy applications with automatic version management and conflict detection.
+
+      ## Phase 1: Pre-flight Checks
+
+      ### 1.1 Scan for Deployment Kits
+      Search the current directory for deployment ZIP files matching the pattern: `deployment-kit-*-*.zip`
+
+      ```bash
+      find . -maxdepth 1 -name "deployment-kit-*.zip" -type f
+      ```
+
+      ### 1.2 Parse ZIP Versions
+      Extract app names and versions from filenames. Format: `deployment-kit-{app-name}-{version}.zip`
+      - Version format: YYYYMMDD.HHmmss (UTC, lexicographically sortable)
+      - Example: `deployment-kit-contract-manager-20260116.143022.zip`
+
+      Parse each ZIP filename and extract:
+      - App name (between "deployment-kit-" and last "-")
+      - Version (after last "-", before ".zip")
+      - File modification time for sorting fallback
+
+      ### 1.3 Check Active Sessions
+      Query portal for concurrent deployments (if portal is reachable):
+      ```bash
+      curl -s https://{portal_host}/api/deployment/active-sessions
+      ```
+
+      ## Phase 2: Skill Version Management (ZIP-Based Auto-Update)
+
+      **CRITICAL**: Always check the skill version bundled IN THE ZIP before deploying. Each deployment kit is self-updating - it contains the exact skill version needed for that deployment.
+
+      **No portal API calls needed** - everything is in the ZIP file.
+
+      **Timing**: Run this phase AFTER Phase 1 identifies available ZIPs, but BEFORE asking user which kit to deploy. If an update is needed, the skill will restart and re-run from Phase 1.
+
+      ### 2.1 Extract and Check ZIP Skill Version
+
+      Identify the LATEST ZIP from Phase 1 (highest version number), then extract its bundled skill:
+
+      ```bash
+      # Extract just the skill file from the latest ZIP
+      unzip -p deployment-kit-{app}-{version}.zip "*/deploy-skill.yaml" > /tmp/zip-skill.yaml
+
+      # Get version from ZIP's skill
+      ZIP_SKILL_VERSION=$(grep "^version:" /tmp/zip-skill.yaml | awk '{print $2}')
+
+      # Get current installed skill version
+      INSTALLED_SKILL_VERSION=$(grep "^version:" ~/.config/claude/skills/deploy.yaml | awk '{print $2}')
+
+      echo "ZIP skill version: $ZIP_SKILL_VERSION"
+      echo "Installed skill version: $INSTALLED_SKILL_VERSION"
+      ```
+
+      ### 2.2 Compare Versions
+
+      If ZIP skill version > installed skill version:
+      1. Inform user:
+         ```
+         📦 Newer skill version found in deployment kit!
+         Current: {installed_version} UTC
+         Available: {zip_version} UTC
+         Updating skill...
+         ```
+
+      2. Backup current skill:
+         ```bash
+         mkdir -p ~/.config/claude/skills/.backups
+         cp ~/.config/claude/skills/deploy.yaml \
+            ~/.config/claude/skills/.backups/deploy-${INSTALLED_SKILL_VERSION}.yaml
+         ```
+
+      3. Extract and install new skill from ZIP:
+         ```bash
+         # Extract skill to temp location
+         unzip -p deployment-kit-{app}-{version}.zip "*/deploy-skill.yaml" > /tmp/new-skill.yaml
+
+         # Install atomically
+         mv /tmp/new-skill.yaml ~/.config/claude/skills/deploy.yaml
+         ```
+
+      4. Inform user:
+         ```
+         ✅ Skill updated from {old_version} to {new_version} UTC
+         Please run /deploy again to use the new version.
+         ```
+
+      5. **STOP execution** and ask user to re-run `/deploy`
+
+      ### 2.3 If Versions Match
+
+      If ZIP skill version == installed skill version:
+      - Log: "✅ Skill version matches deployment kit ({version} UTC)"
+      - Continue to next phase
+
+      ### 2.4 If ZIP Skill is Older
+
+      If ZIP skill version < installed skill version:
+      - Log: "ℹ️ Installed skill ({installed_version} UTC) is newer than ZIP ({zip_version} UTC)"
+      - Log: "Keeping installed version (no downgrade)"
+      - Continue to next phase
+
+      **IMPORTANT**: This phase checks ONLY the ZIP's bundled skill. No portal API calls needed for version management.
+
+      ## Phase 3: ZIP Selection & Display
+
+      ### 3.1 Group and Sort ZIPs
+      Group ZIPs by app name and sort by version (descending):
+
+      Display to user:
+      ```
+      ═══════════════════════════════════════════════════════════════════
+                          DEPLOYMENT KITS FOUND
+      ═══════════════════════════════════════════════════════════════════
+
+      {app-name-1}:
+        1. Version {version-1} ({time-ago}) [LATEST]
+        2. Version {version-2} ({time-ago})
+
+      {app-name-2}:
+        1. Version {version-1} ({time-ago}) [LATEST]
+
+      ───────────────────────────────────────────────────────────────────
+      Auto-selected: {app-name-1} (version {version-1})
+      ───────────────────────────────────────────────────────────────────
+      ```
+
+      ### 3.2 Confirm Selection
+      Ask user: "Deploy {app-name} with version {version}? [Y/n/choose different]"
+      - Y or Enter: Proceed with auto-selected (latest)
+      - n: Cancel deployment
+      - "choose different": Show numbered list and ask user to select
+
+      ## Phase 4: Concurrent Deployment Check
+
+      ### 4.1 Query Active Sessions
+      If portal is reachable, check for active sessions from Phase 1.4 results.
+
+      If active session found for same app:
+      ```
+      ⚠️  CONCURRENT DEPLOYMENT DETECTED
+      ═══════════════════════════════════════════════════════════════════
+
+      Another Claude window is currently deploying:
+        App: {app_name}
+        Started: {time_ago}
+        Your email: {user_email}
+
+      ───────────────────────────────────────────────────────────────────
+      Options:
+      1. Wait and retry (check again in 30 seconds)
+      2. Continue anyway (may cause conflicts)
+      3. Cancel deployment
+
+      Choose [1/2/3]:
+      ```
+
+      Handle user choice:
+      - 1: Sleep 30 seconds, re-check, repeat
+      - 2: Log warning and continue
+      - 3: Exit
+
+      ### 4.2 Register Deployment Session
+      If no conflicts or user chose to continue:
+
+      ```bash
+      curl -X POST https://{portal_host}/api/deployment/register-session \
+        -H "Content-Type: application/json" \
+        -d '{"app_name": "{app_name}", "version": "{version}"}'
+      ```
+
+      Store session registration status for cleanup later.
+
+      ## Phase 5: Deployment Execution
+
+      ### 5.1 Extract Deployment Kit
+      Create temporary directory and extract ZIP:
+
+      ```bash
+      TEMP_DIR=$(mktemp -d)
+      unzip -q deployment-kit-{app}-{version}.zip -d "$TEMP_DIR"
+      cd "$TEMP_DIR"/deployment-kit-{app}-{version}
+      ```
+
+      ### 5.2 Read Deployment Instructions
+      Read and parse CLAUDE_PROMPT.md from extracted kit:
+
+      ```bash
+      cat CLAUDE_PROMPT.md
+      ```
+
+      ### 5.3 Execute 11-Step Deployment Process
+      Follow the deployment steps from CLAUDE_PROMPT.md:
+
+      1. **Pre-flight Check**: Detect old deployment references
+      2. **Display Summary**: Show deployment configuration (read from config.json)
+      3. **Fix SSH Permissions**: chmod 600 on PEM file
+      4. **Copy to Server**: rsync with excludes
+      5. **Check Prerequisites**: Docker, docker-compose, permissions
+      6. **Configure App**: Next.js basePath, API URLs, etc.
+      7. **Port Conflict Check**: MANDATORY - check for conflicts
+      8. **Docker Deploy**: Start containers with sg docker -c wrapper
+      9. **Configure Nginx**: Automated or manual location blocks
+      10. **Verify Deployment**: Test containers, proxy, HTTPS
+      11. **Return to Localhost**: Clean up local files
+
+      During execution:
+      - Show progress for each step
+      - Handle errors gracefully
+      - Ask user for input when needed (secrets, confirmation)
+      - Log all commands executed
+
+      ### 5.4 Deployment Verification
+      After deployment completes, verify:
+
+      ```bash
+      # Check container status
+      ssh -i capsule-deploy.pem {user}@{host} "cd /home/{user}/deployments/{app} && docker-compose ps"
+
+      # Check nginx config
+      ssh -i capsule-deploy.pem {user}@{host} "sudo nginx -t"
+
+      # Test HTTPS endpoint
+      curl -I https://{host}/{app}/
+      ```
+
+      Display results to user with success/failure status.
+
+      ## Phase 6: Cleanup & Unregister
+
+      ### 6.1 Unregister Session
+      Regardless of success/failure, unregister session:
+
+      ```bash
+      curl -X POST https://{portal_host}/api/deployment/unregister-session
+      ```
+
+      ### 6.2 Clean Temporary Files
+      Remove temporary extraction directory:
+
+      ```bash
+      rm -rf "$TEMP_DIR"
+      ```
+
+      ### 6.3 Display Final Summary
+      ```
+      ═══════════════════════════════════════════════════════════════════
+                          DEPLOYMENT COMPLETE
+      ═══════════════════════════════════════════════════════════════════
+
+      App: {app_name}
+      Version: {version}
+      URL: https://{host}/{app}/
+
+      Status: ✅ Success / ❌ Failed
+
+      Next steps:
+      - Visit your app: https://{host}/{app}/
+      - Monitor logs: ssh -i capsule-deploy.pem {user}@{host}
+      - View activity: https://{host}/deploy/activity
+
+      ═══════════════════════════════════════════════════════════════════
+      ```
+
+      ## Error Handling
+
+      ### Portal Unreachable
+      If portal API calls fail (timeout, connection refused):
+      - Log warning: "Portal unreachable - proceeding in offline mode"
+      - Skip version check (use current skill version)
+      - Skip session registration (no conflict detection)
+      - Continue with deployment
+
+      ### ZIP File Corrupted
+      If unzip fails:
+      - Show error: "ZIP file appears corrupted. Please re-download from portal."
+      - List corrupted file path
+      - Exit without deploying
+
+      ### Deployment Failure
+      If any step fails:
+      - Show clear error message with failed step
+      - Show relevant logs/output
+      - Ask user: "Retry this step / Skip and continue / Abort deployment"
+      - Always unregister session before exiting
+
+      ### SSH Connection Failed
+      If SSH fails:
+      - Check if PEM file has correct permissions (chmod 600)
+      - Check if user's IP is whitelisted
+      - Show troubleshooting steps
+      - Exit gracefully
+
+      ## Edge Cases
+
+      1. **No ZIP Files Found**:
+         - Message: "No deployment kits found. Please download a kit from the portal."
+         - Show portal URL for user to visit
+         - Exit
+
+      2. **Multiple Users, Same Machine**:
+         - Session tracking is per-user (by email)
+         - Each user can deploy concurrently to different apps
+         - Only block if same user, same app
+
+      3. **Version Parse Failure**:
+         - Fall back to file modification time for sorting
+         - Log warning: "Non-standard ZIP filename detected"
+         - Continue with best-effort version extraction
+
+      4. **Skill Update During Deployment**:
+         - Only check version at start (Phase 2)
+         - Don't interrupt mid-deployment
+         - Next /deploy invocation will update
+
+      5. **Stale Lock Files**:
+         - Portal auto-expires sessions after 30 minutes
+         - Skill can force unregister on completion
+         - User can manually unregister via portal UI
+
+      ## Security Considerations
+
+      - Validate all inputs (app names, versions, paths)
+      - Never execute arbitrary commands from user input
+      - Validate SSH key permissions before use
+      - Use HTTPS for all portal API calls
+      - Don't log secrets or API keys
+      - Clean up temporary files securely
+
+      ## Performance Optimizations
+
+      - Cache portal version check (60 second TTL)
+      - Parallel ZIP scanning (if multiple files)
+      - Stream large file transfers
+      - Show progress indicators for long operations
+
+  - name: deploy status
+    description: Check deployment status and active sessions
+    instructions: |
+      # Check Deployment Status
+
+      Query the portal for active deployment sessions and system status.
+
+      ## Step 1: Get Current User Info
+      Determine the user's email from the environment or prompt them.
+
+      ## Step 2: Query Portal
+      Extract portal host from any deployment ZIP's config.json, or ask user for portal URL.
+
+      ```bash
+      # Get portal host
+      PORTAL_HOST=$(unzip -p deployment-kit-*.zip "*/config.json" | grep -o '"ec2_host": "[^"]*"' | cut -d'"' -f4 | head -1)
+
+      # Query version
+      curl -s https://$PORTAL_HOST/api/deployment/version | jq .
+
+      # Query active sessions
+      curl -s https://$PORTAL_HOST/api/deployment/active-sessions | jq .
+      ```
+
+      ## Step 3: Display Results
+      ```
+      ═══════════════════════════════════════════════════════════════════
+                        DEPLOYMENT SYSTEM STATUS
+      ═══════════════════════════════════════════════════════════════════
+
+      Portal Version: {version}
+      Skill Version: {skill_version}
+      Status: {Up to date / Update available}
+
+      ───────────────────────────────────────────────────────────────────
+      Active Deployments:
+      ───────────────────────────────────────────────────────────────────
+
+      {List of active sessions, or "No active deployments"}
+
+      ═══════════════════════════════════════════════════════════════════
+      ```
+
+  - name: deploy update
+    description: Force skill update check and download latest version
+    instructions: |
+      # Force Skill Update
+
+      Manually trigger a skill update check and download.
+
+      ## Step 1: Get Portal URL
+      Ask user for portal host or extract from deployment ZIP.
+
+      ## Step 2: Query Current Version
+      ```bash
+      curl -s https://{portal_host}/api/deployment/version
+      ```
+
+      ## Step 3: Compare Versions
+      Show current skill version vs portal version.
+
+      ## Step 4: Download Update
+      If portal version is newer (or user confirms):
+
+      ```bash
+      # Download new skill
+      curl -s -o ~/.config/claude/skills/deploy.yaml.new https://{portal_host}/api/deployment/skill
+
+      # Backup current
+      mkdir -p ~/.config/claude/skills/.backups
+      cp ~/.config/claude/skills/deploy.yaml ~/.config/claude/skills/.backups/deploy-backup-$(date +%Y%m%d.%H%M%S).yaml
+
+      # Replace
+      mv ~/.config/claude/skills/deploy.yaml.new ~/.config/claude/skills/deploy.yaml
+
+      echo "✅ Skill updated successfully!"
+      ```
+
+      ## Step 5: Verify
+      ```bash
+      # Show new version
+      grep "^version:" ~/.config/claude/skills/deploy.yaml
+      ```
+
+metadata:
+  author: Capsule Cloud
+  documentation: https://github.com/capsule-cloud/deploy-portal
+  version_format: YYYYMMDD.HHmmss
+  portal_api_base: /api/deployment

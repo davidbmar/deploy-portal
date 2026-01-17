@@ -16,6 +16,13 @@ app.config.from_object(Config)
 # Initialize AWS client
 ec2_client = boto3.client('ec2', region_name=Config.get_region())
 
+# Deployment version (generated at startup)
+DEPLOYMENT_VERSION = datetime.utcnow().strftime(Config.DEPLOYMENT_VERSION_FORMAT)
+
+# Active deployment sessions tracking
+# Format: {user_email: {'app_name': str, 'started_at': datetime, 'version': str}}
+active_deployments = {}
+
 def get_user_info():
     """Extract user info from oauth2-proxy headers"""
     email = request.headers.get('X-User-Email', 'unknown@unknown.com')
@@ -216,7 +223,9 @@ PORT=8000
 def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new'):
     """Generate app-specific deployment kit with automation instructions"""
     instance_ip = Config.get_instance_ip()
-    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    # Use deployment version format (lexicographically sortable)
+    version = datetime.utcnow().strftime(Config.DEPLOYMENT_VERSION_FORMAT)
+    timestamp = version  # For backward compatibility with template
     is_update = deploy_mode == 'update'
 
     # Read the SSH private key
@@ -234,8 +243,57 @@ Generated at: {datetime.utcnow().isoformat()}Z
 Your IP: {ip}
 App Name: {app_name}
 App Type: {app_type}
+Kit Version: {version} UTC
 
 ## Quick Start
+
+You have TWO options for deploying:
+
+---
+
+### ⭐ OPTION 1: One-Command Deployment (Recommended)
+
+Deploy with a single `/deploy` command using the included skill.
+
+#### FIRST TIME ONLY - Install the Skill (10 seconds)
+
+The `deploy-skill.yaml` file is in THIS folder. Run ONE command:
+
+```bash
+cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+```
+
+That's it! Skill is installed. You never need to do this again.
+
+#### Every Deployment - Three Steps
+
+**Step 1**: Move this ZIP to your project folder
+```bash
+cp deployment-kit-{app_name}-{timestamp}.zip ~/path/to/your-project/
+```
+
+**Step 2**: Open Claude Code in your project
+```bash
+cd ~/path/to/your-project
+claude-code
+```
+
+**Step 3**: Type this command
+```
+/deploy
+```
+
+Done! The skill will:
+- Find the deployment kit automatically
+- **Check the ZIP's skill version** (auto-updates if newer)
+- Deploy your app
+- Give you the live URL
+
+**Next time you deploy**: Just download a new kit, move the ZIP to your project, and run `/deploy` again. The skill checks the ZIP and auto-updates itself if the ZIP has a newer version.
+
+---
+
+### OPTION 2: Manual Deployment (Traditional)
 
 1. Open terminal in this directory
 
@@ -294,40 +352,242 @@ I need you to deploy this project to our cloud server with automated setup.
     # App-specific CLAUDE_PROMPT.md with improved template
     claude_prompt = f"""{mode_header}
 
-## Application Details
+## CRITICAL: Local vs Cloud Configuration Rules
 
-- **App Name**: {app_name}
-- **App Type**: {app_type}
-- **Deployment Mode**: {'🔄 UPDATE existing app' if is_update else '🆕 NEW deployment'}
-- **Target Directory**: `/home/{Config.EC2_USER}/deployments/{app_name}/`
-- **Public URL**: `https://{instance_ip}/{app_name}/` (after setup)
+**IMPORTANT**: This deployment kit is ONLY for deploying to the cloud. Your LOCAL source files should remain clean for local development.
 
-## Connection Details
+### Rule 1: Local Files = Localhost URLs
+| Context | API URL to Use |
+|---------|----------------|
+| **Local Development** (default) | `http://localhost:8000/api` |
+| **Cloud Deployment** (only during deploy) | `https://{instance_ip}/{app_name}/api` |
 
-- **Host**: {instance_ip}
-- **User**: {Config.EC2_USER}
-- **SSH Key**: Use the capsule-deploy.pem file in this directory
+### Rule 2: Container Names
+| Context | Container Names |
+|---------|-----------------|
+| **Local Development** | Generic names or omit `container_name` entirely |
+| **Cloud Deployment** | `{app_name}-backend`, `{app_name}-dashboard`, etc. |
 
-## Deployment Process
+### Rule 3: Deployment-Specific Changes = SERVER ONLY
+**NEVER modify local source files with:**
+- Cloud URLs (`https://{instance_ip}/...`)
+- Deployment-specific container names (`{app_name}-backend`)
+- Production basePath in next.config.js
 
-### Step 1: Fix SSH Key Permissions
+**ALL deployment-specific changes are made ON THE SERVER after rsync.**
+
+---
+
+## ⚠️ PRE-FLIGHT CHECK: Detect Old Deployment References
+
+**BEFORE deploying, check if local files have OLD deployment names:**
+
+```bash
+# Check for ANY deployment-specific names in local docker-compose.yml
+grep -E "container_name:.*-backend|container_name:.*-dashboard|container_name:.*-postgres" docker-compose.yml
+```
+
+**If you find references to a DIFFERENT app name (not `{app_name}`), STOP and alert the user:**
+
+> "⚠️ WARNING: Your local docker-compose.yml contains references to a previous deployment.
+> Found: [old-app-name]-backend, [old-app-name]-dashboard
+> Expected for this deployment: {app_name}
+>
+> Your LOCAL files should use generic names for local development.
+> Should I clean up the local docker-compose.yml before proceeding?"
+
+**To clean local docker-compose.yml for local development:**
+1. Remove or genericize `container_name` lines
+2. Change URLs back to `http://localhost:8000/api`
+3. Remove basePath from next.config.js (or set to empty string)
+
+---
+
+## 🔄 STEP 0: Check and Update Deployment Skill (REQUIRED FIRST STEP)
+
+**⚠️ CRITICAL: Always check for skill updates BEFORE deploying!**
+
+This deployment kit includes a versioned `deploy-skill.yaml` file. Before proceeding with deployment, you MUST check if the skill in this ZIP is newer than your installed version and update if needed.
+
+### Why This Matters
+
+The skill version is synchronized with the deployment kit. Using an outdated skill may cause:
+- Missing features or bug fixes
+- Incompatible deployment steps
+- Failed deployments
+
+### Step 0.1: Check Current Skill Version
+
+```bash
+# Check if you have the skill installed
+if [ -f ~/.config/claude/skills/deploy.yaml ]; then
+    INSTALLED_VERSION=$(grep "^version:" ~/.config/claude/skills/deploy.yaml | awk '{{print $2}}')
+    echo "Installed skill version: $INSTALLED_VERSION UTC"
+else
+    echo "No skill installed yet"
+    INSTALLED_VERSION=""
+fi
+```
+
+### Step 0.2: Check ZIP's Skill Version
+
+```bash
+# Get the skill version from this deployment kit
+ZIP_VERSION=$(grep "^version:" deploy-skill.yaml | awk '{{print $2}}')
+echo "Deployment kit skill version: $ZIP_VERSION UTC"
+```
+
+### Step 0.3: Compare and Update
+
+```bash
+# Compare versions (lexicographic comparison works because format is YYYYMMDD.HHmmss)
+if [ -z "$INSTALLED_VERSION" ]; then
+    echo "📦 First-time skill installation required"
+    echo "Installing skill from deployment kit..."
+    mkdir -p ~/.config/claude/skills
+    cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+    echo "✅ Skill installed: $ZIP_VERSION UTC"
+    echo ""
+    echo "🎯 TIP: Next time you deploy, just run '/deploy' in Claude Code!"
+    echo "       The skill will auto-check for updates."
+elif [[ "$ZIP_VERSION" > "$INSTALLED_VERSION" ]]; then
+    echo "📦 Newer skill version found in deployment kit!"
+    echo "   Current:   $INSTALLED_VERSION UTC"
+    echo "   Available: $ZIP_VERSION UTC"
+    echo ""
+    echo "Backing up old skill..."
+    mkdir -p ~/.config/claude/skills/.backups
+    cp ~/.config/claude/skills/deploy.yaml \\
+       ~/.config/claude/skills/.backups/deploy-${{INSTALLED_VERSION}}.yaml
+    echo "Installing new skill..."
+    cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+    echo "✅ Skill updated from $INSTALLED_VERSION UTC to $ZIP_VERSION UTC"
+    echo ""
+    echo "🎯 TIP: Use '/deploy' command in Claude Code for easier deployments!"
+elif [[ "$ZIP_VERSION" == "$INSTALLED_VERSION" ]]; then
+    echo "✅ Skill version matches deployment kit ($ZIP_VERSION UTC)"
+    echo "   No update needed. Proceeding with deployment..."
+else
+    echo "⚠️  ZIP skill version ($ZIP_VERSION UTC) is older than installed ($INSTALLED_VERSION UTC)"
+    echo "   Keeping installed version (no downgrade)."
+fi
+```
+
+### Step 0.4: Proceed to Deployment
+
+Once the skill version check is complete, proceed to Step 1.
+
+**📌 IMPORTANT**: If you prefer using the `/deploy` skill command (recommended), you can stop here! The skill will automatically perform all the following steps when you run `/deploy` in Claude Code.
+
+To use the skill:
+1. Open Claude Code in this directory: `claude-code`
+2. Type: `/deploy`
+3. The skill will handle everything automatically!
+
+If you prefer manual deployment or need to troubleshoot, continue with Step 1 below.
+
+---
+
+## 📋 STEP 1: Display Pre-Deployment Summary & Get Confirmation
+
+**BEFORE doing anything else**, analyze the project and display this summary to the user:
+
+```
+════════════════════════════════════════════════════════════════════════════════
+                           DEPLOYMENT SUMMARY
+════════════════════════════════════════════════════════════════════════════════
+
+  App Name: {app_name}
+  Deployment Mode: {'🔄 UPDATE (sync changes & restart)' if is_update else '🆕 NEW deployment (fresh install)'}
+  App Type: {app_type}
+  Generated: {timestamp}
+
+────────────────────────────────────────────────────────────────────────────────
+  SERVER DETAILS
+────────────────────────────────────────────────────────────────────────────────
+
+  • Host: {instance_ip}
+  • User: {Config.EC2_USER}
+  • SSH Key: capsule-deploy.pem (included in kit)
+  • Deployment Path: /home/{Config.EC2_USER}/deployments/{app_name}/
+
+────────────────────────────────────────────────────────────────────────────────
+  URLs AFTER DEPLOYMENT
+────────────────────────────────────────────────────────────────────────────────
+
+  • Public URL: https://{instance_ip}/{app_name}/
+  • API URL: https://{instance_ip}/{app_name}/api/
+  • Monitor: https://{instance_ip}/deploy/activity
+
+────────────────────────────────────────────────────────────────────────────────
+  WHAT WILL BE DEPLOYED
+────────────────────────────────────────────────────────────────────────────────
+
+  [Analyze the project and fill in details like:]
+  • Frontend: [framework] on port [port]
+  • Backend: [framework] on port [port]
+  • Database: [type] on port [port] (if applicable)
+  • Authentication: OAuth2 protected via nginx
+
+────────────────────────────────────────────────────────────────────────────────
+  CONFIGURATION REQUIREMENTS
+────────────────────────────────────────────────────────────────────────────────
+
+  1. Next.js Config Changes (if applicable):
+     • basePath: '/{app_name}'
+     • assetPrefix: '/{app_name}'
+     • trailingSlash: true
+     • NEXT_PUBLIC_API_URL → public HTTPS URL
+
+  2. Environment Variables (ON SERVER ONLY):
+     • NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
+     • NEXT_PUBLIC_API_KEY={dashboard_api_key}
+     • [Plus any app-specific variables]
+
+  3. Nginx Configuration:
+     • /{app_name}/ → Frontend
+     • /{app_name}/api/ → Backend API
+
+────────────────────────────────────────────────────────────────────────────────
+  AUTOMATION SCRIPTS AVAILABLE
+────────────────────────────────────────────────────────────────────────────────
+
+  • automation/deploy-app.sh - Main deployment script
+  • automation/nginx-register.sh - Nginx configuration
+  • automation/systemd-register.sh - Systemd service setup
+  • automation/port-allocator.sh - Port conflict detection
+  • automation/registry-manager.sh - App registry management
+
+────────────────────────────────────────────────────────────────────────────────
+  PREREQUISITES
+────────────────────────────────────────────────────────────────────────────────
+
+  ✓ Server must have Docker & Docker Compose installed
+  ✓ Ubuntu user must be in docker group
+  ✓ Required ports must be available (or will be remapped)
+  ✓ SSH key permissions must be 600
+
+════════════════════════════════════════════════════════════════════════════════
+```
+
+**⚠️ ASK THE USER FOR CONFIRMATION BEFORE PROCEEDING:**
+
+> "I've analyzed your project and prepared the deployment summary above.
+> Should I proceed with the deployment to {instance_ip}?"
+
+**Wait for user confirmation before continuing to Step 2.**
+
+---
+
+## 📋 STEP 2: Fix SSH Key Permissions
 
 ```bash
 chmod 600 capsule-deploy.pem
 ```
 
-### Step 2: Analyze This Project
+---
 
-Before deploying, analyze:
-1. What language/framework? (Node.js, Python, Go, etc.)
-2. What's the start command? (npm start, python app.py, etc.)
-3. Does it have dependencies? (package.json, requirements.txt, go.mod)
-4. Any environment variables needed?
-5. Does it have a Dockerfile or docker-compose.yml?
-6. Is this a Next.js app? (Check for next.config.js)
-7. Does this app have a separate API backend? (Check for multiple services)
-
-### Step 3: Copy Project to Server
+## 📋 STEP 3: Copy Project to Server
 
 ```bash
 # From your local machine (in project directory)
@@ -339,7 +599,9 @@ rsync -avz --exclude 'node_modules' --exclude 'venv' --exclude '.git' --exclude 
 - node_modules/venv are excluded (will be rebuilt on server)
 - Build artifacts (.next, dist, build) are excluded (will be rebuilt)
 
-### Step 4: Check Server Prerequisites
+---
+
+## 📋 STEP 4: Check Server Prerequisites
 
 {'**⏭️ SKIP FOR UPDATES** - Prerequisites already verified.' if is_update else '**Before deploying, ensure the server has required tools:**'}
 
@@ -361,14 +623,38 @@ sudo usermod -aG docker {Config.EC2_USER}
 # Note: May need to reconnect SSH for group to take effect
 ```
 
-### Step 5: Configure Application for Subpath Deployment
+### Step 5: Configure Application for Subpath Deployment (ON SERVER ONLY)
 
 {'**⏭️ SKIP FOR UPDATES** - Subpath configuration already done.' if is_update else '**For Next.js Applications with Separate Backend:**'}
 
-If this is a Next.js dashboard with a separate API backend, you MUST configure it for subpath deployment:
+⚠️ **CRITICAL ORDER FOR NEXT.JS APPS**: You MUST configure next.config.js BEFORE building Docker containers!
+
+**Correct sequence (DO NOT SKIP OR REORDER):**
+1. ✅ Rsync files to server (Step 3)
+2. ✅ SSH to server
+3. ✅ **Update next.config.js with basePath** ← MUST BE FIRST
+4. ✅ Update .env.local with cloud URLs
+5. ✅ Update docker-compose.yml
+6. ✅ **THEN** run docker compose build (Step 7) ← MUST BE LAST
+
+**Why this order is critical:**
+- Docker bakes next.config.js into image during build
+- If you build FIRST then change config = build uses OLD config
+- Result: Page loads without CSS (looks like 1990s webpage)
+- Fix requires slow rebuild: `sg docker -c 'docker compose build --no-cache dashboard'`
+
+**⚠️ IMPORTANT: These changes are made ON THE SERVER after rsync, NOT on your local machine!**
+
+SSH into the server first, then make these changes in the server's copy:
 
 ```bash
-# 1. Update next.config.js
+# SSH to server first
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+
+# Navigate to the deployment directory
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# 1. Update next.config.js (ON SERVER) - DO THIS BEFORE DOCKER BUILD!
 cat > dashboard/next.config.js << 'EOF'
 /** @type {{import('next').NextConfig}} */
 const nextConfig = {{
@@ -382,13 +668,14 @@ const nextConfig = {{
 module.exports = nextConfig
 EOF
 
-# 2. Update .env.local for dashboard
+# 2. Update .env.local for dashboard (ON SERVER)
 cat > dashboard/.env.local << 'EOF'
 NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
 NEXT_PUBLIC_API_KEY={dashboard_api_key}
 EOF
 
-# 3. Update docker-compose.yml build args
+# 3. Update docker-compose.yml build args (ON SERVER)
+# Edit the SERVER's docker-compose.yml to use cloud URLs:
 # Change:
 #   - NEXT_PUBLIC_API_URL=http://localhost:8000/api
 # To:
@@ -401,19 +688,74 @@ EOF
 - `trailingSlash: true` ensures URLs work with trailing slashes (nginx standard)
 - `NEXT_PUBLIC_API_URL` must use the public HTTPS URL, not localhost
 
-### Step 6: Handle Port Conflicts
+**⚠️ DO NOT modify your local docker-compose.yml with cloud URLs! Keep it using localhost.**
 
-{'**⏭️ SKIP FOR UPDATES** - Ports already allocated.' if is_update else '**Check for port conflicts before starting:**'}
+### Step 6: Check for Port Conflicts (MANDATORY - DO THIS FIRST!)
+
+{'**For UPDATES:** Check if your existing containers are still running, restart if needed.' if is_update else '**⚠️ CRITICAL: You MUST check for port conflicts BEFORE deploying!**'}
+
+Default ports in docker-compose.yml:
+- **Dashboard (Frontend):** 3000
+- **Backend (API):** 8000
+- **PostgreSQL (Database):** 5432
+
+If other apps are already running on these ports, Docker will fail to start.
+
+#### 6a. Check all running containers and their ports
 
 ```bash
-# Check if ports are in use
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+
+# See ALL containers and what ports they're using
+docker ps --format "table {{{{.Names}}}}\t{{{{.Ports}}}}"
+
+# Check specific ports
 sudo lsof -i :3000
 sudo lsof -i :8000
 sudo lsof -i :5432
+```
 
-# If port 3000 is in use, update docker-compose.yml:
-# Change: "3000:3000"
-# To: "3001:3000" (or next available port)
+**Example output showing ports in use:**
+```
+NAMES                      PORTS
+my-app-test-11-dashboard   0.0.0.0:3001->3000/tcp
+my-app-test-11-backend     0.0.0.0:8000->8000/tcp
+my-app-test-11-postgres    0.0.0.0:5432->5432/tcp
+```
+
+#### 6b. If ports are in use, update docker-compose.yml BEFORE deploying
+
+```bash
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# Find available ports by incrementing from occupied ones
+# If 3000 is used → try 3001, 3002, etc.
+# If 8000 is used → try 8001, 8002, etc.
+# If 5432 is used → try 5433, 5434, etc.
+
+# Update ports in docker-compose.yml using sed
+# Example: Use ports 3002, 8002, 5434
+sed -i 's/"5432:5432"/"5434:5432"/g' docker-compose.yml
+sed -i 's/"8000:8000"/"8002:8000"/g' docker-compose.yml
+sed -i 's/"3000:3000"/"3002:3000"/g' docker-compose.yml
+
+# Verify changes were applied
+grep -E "ports:" -A1 docker-compose.yml
+```
+
+**⚠️ IMPORTANT: Port Mapping Format**
+- Format: `"HOST_PORT:CONTAINER_PORT"`
+- **Only change the LEFT number** (host port)
+- **Never change the RIGHT number** (container internal port)
+- Example: `"3002:3000"` means "map host port 3002 to container port 3000"
+
+**📝 WRITE DOWN YOUR PORTS! You'll need them for nginx config in Step 8!**
+
+```
+My allocated ports for {app_name}:
+- Dashboard: ______ (default 3000)
+- Backend:  ______ (default 8000)
+- Postgres: ______ (default 5432)
 ```
 
 ### Step 7: Deploy with Docker Compose
@@ -448,22 +790,110 @@ sg docker -c 'docker-compose logs -f'
 
 ### Step 8: Configure Nginx for Authenticated Access
 
-{'**⏭️ SKIP THIS STEP FOR UPDATES** - Nginx is already configured for this app.' if is_update else '**For multi-service apps (frontend + backend), you need TWO nginx locations:**'}
+{'**⏭️ SKIP THIS STEP FOR UPDATES** - Nginx is already configured for this app.' if is_update else '**For multi-service apps (frontend + backend), you need nginx location blocks:**'}
+
+#### Option A: AUTOMATED (Recommended)
+
+**Use the nginx-register.sh script from the deployment kit:**
+
+```bash
+# Copy automation scripts to server (if not already there)
+rsync -avz -e "ssh -i capsule-deploy.pem" ./automation/ {Config.EC2_USER}@{instance_ip}:~/deployments/{app_name}/automation/
+
+# SSH to server
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+
+# Run the multi-service nginx registration
+# Replace DASHBOARD_PORT and BACKEND_PORT with your actual ports from Step 6!
+cd ~/deployments/{app_name}
+bash automation/nginx-register.sh add-multiservice {app_name} DASHBOARD_PORT BACKEND_PORT
+
+# Example with actual ports:
+# bash automation/nginx-register.sh add-multiservice {app_name} 3002 8002
+
+# Reload nginx
+bash automation/nginx-register.sh reload
+```
+
+**What this does automatically:**
+- Creates upstream definition for frontend
+- Adds frontend location block (`/{app_name}/`)
+- Adds API location block (`/{app_name}/api/`)
+- Tests nginx config before applying
+- Backs up existing config
+
+---
+
+#### Option B: MANUAL (If automated doesn't work)
+
+**⚠️ CRITICAL: Use YOUR allocated ports from Step 6, not the defaults!**
+
+If you changed ports in Step 6:
+- Dashboard port: Use YOUR port (e.g., 3002 instead of 3000)
+- Backend port: Use YOUR port (e.g., 8002 instead of 8000)
 
 #### 8a. Create upstream definition
 
+**Replace DASHBOARD_PORT with your actual dashboard port from Step 6!**
+
 ```bash
 # Add to end of /etc/nginx/sites-available/auth-gateway
+# ⚠️ REPLACE DASHBOARD_PORT with your actual port (e.g., 3000, 3001, 3002)
 sudo bash -c 'cat >> /etc/nginx/sites-available/auth-gateway << EOF
 
 # {app_name} upstream
 upstream {app_name}_backend {{
-    server 127.0.0.1:3000;
+    server 127.0.0.1:DASHBOARD_PORT;
 }}
 EOF'
 ```
 
-#### 8b. Add frontend location block
+**Example with actual port:**
+```bash
+sudo bash -c 'cat >> /etc/nginx/sites-available/auth-gateway << EOF
+
+# {app_name} upstream
+upstream {app_name}_backend {{
+    server 127.0.0.1:3002;
+}}
+EOF'
+```
+
+#### 8b. Add static assets location block (NO AUTH - MUST COME FIRST!)
+
+⚠️ **CRITICAL FOR NEXT.JS**: This block must be added BEFORE the main frontend location block!
+
+```bash
+sudo bash -c 'cat > /tmp/{app_name}-static.conf << "EOF"
+
+    # Static assets for {app_name} (no auth required)
+    location /{app_name}/_next/static/ {{
+        proxy_pass http://{app_name}_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host \\$host;
+        proxy_cache_valid 200 60m;
+        add_header Cache-Control "public, max-age=3600, immutable";
+    }}
+EOF
+'
+
+# Insert BEFORE the main app location block
+sudo sed -i '/# Protected: {app_name}/r /tmp/{app_name}-static.conf' /etc/nginx/sites-available/auth-gateway
+```
+
+**Why no auth?**
+- Static assets (CSS/JS) don't need authentication
+- Requiring auth = OAuth redirects for every CSS file
+- Result: Page loads but displays with ZERO styling
+
+**Location block order MUST be:**
+1. `location /{app_name}/_next/static/ {{ }}` ← NO AUTH - CSS/JS
+2. `location /{app_name}/ {{ }}` ← WITH AUTH - HTML pages
+3. `location /{app_name}/api/ {{ }}` ← WITH AUTH - API
+
+---
+
+#### 8c. Add frontend location block
 
 ```bash
 # Add BEFORE the "# Health check endpoint" line
@@ -508,10 +938,13 @@ EOF
 sed -i "/# Health check endpoint/r /tmp/{app_name}-location.conf" /etc/nginx/sites-available/auth-gateway'
 ```
 
-#### 8c. **NEW: Add API location block (CRITICAL for frontend-backend apps)**
+#### 8d. Add API location block (CRITICAL for frontend-backend apps)
+
+**⚠️ CRITICAL: Replace BACKEND_PORT with your actual backend port from Step 6!**
 
 ```bash
 # Add API proxy location
+# ⚠️ REPLACE BACKEND_PORT with your actual port (e.g., 8000, 8001, 8002)
 sudo bash -c 'cat > /tmp/{app_name}-api-location.conf << "EOF"
 
     # API endpoint for {app_name}
@@ -527,8 +960,8 @@ sudo bash -c 'cat > /tmp/{app_name}-api-location.conf << "EOF"
         # Rewrite to remove /{app_name} prefix
         rewrite ^/{app_name}/api/(.*)\\$ /api/\\$1 break;
 
-        # Proxy to backend API
-        proxy_pass http://127.0.0.1:8000;
+        # Proxy to backend API - USE YOUR BACKEND PORT!
+        proxy_pass http://127.0.0.1:BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Host \\$host;
         proxy_set_header X-Real-IP \\$remote_addr;
@@ -552,7 +985,7 @@ EOF
 sed -i "/# Protected: {app_name}/r /tmp/{app_name}-api-location.conf" /etc/nginx/sites-available/auth-gateway'
 ```
 
-#### 8d. Test and reload nginx
+#### 8e. Test and reload nginx
 
 ```bash
 sudo nginx -t
@@ -564,17 +997,57 @@ sudo systemctl reload nginx
 - `/{app_name}/api/` proxies API requests to the backend
 - Without the API location, the frontend will show "Cannot connect to backend"
 
-### Step 9: Verify Deployment
+### Step 9: Verify CSS Loading (CRITICAL FOR NEXT.JS)
+
+After deployment, VERIFY that CSS loads correctly:
+
+```bash
+# Check nginx access log - CSS should return HTTP 200
+sudo grep "_next/static/css" /var/log/nginx/access.log | tail -5
+
+# Expected: HTTP 200 responses
+# If HTTP 302: Static location block missing (go back to Step 8b)
+# If HTTP 404: Next.js built without basePath (rebuild required)
+```
+
+**Troubleshooting: Page Loads Without CSS**
+
+| Symptom | Fix |
+|---------|-----|
+| Browser shows HTTP 302 for CSS | Add static location block (Step 8b) |
+| Browser shows HTTP 404 for CSS | Rebuild: `sg docker -c 'docker compose build --no-cache dashboard'` |
+| Browser shows HTTP 200 but no CSS | Hard refresh: Cmd+Shift+R or Ctrl+Shift+F5 |
+
+**Quick diagnostic script:**
+
+```bash
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# 1. Check next.config.js has basePath
+cat dashboard/next.config.js | grep -E "basePath|assetPrefix"
+
+# 2. Check nginx has static location
+sudo grep -A5 "{app_name}/_next/static" /etc/nginx/sites-available/auth-gateway
+
+# 3. Check CSS requests in nginx log
+sudo grep "_next/static" /var/log/nginx/access.log | tail -10
+```
+
+---
+
+### Step 10: Verify Deployment
+
+**⚠️ Use YOUR allocated ports from Step 6!**
 
 ```bash
 # Check all containers are running
 sg docker -c 'docker-compose ps'
 
-# Test frontend locally
-curl http://localhost:3000/{app_name}/
+# Test frontend locally (use YOUR dashboard port)
+curl http://localhost:YOUR_DASHBOARD_PORT/{app_name}/
 
-# Test backend API locally
-curl http://localhost:8000/api/
+# Test backend API locally (use YOUR backend port)
+curl http://localhost:YOUR_BACKEND_PORT/api/
 
 # Test public HTTPS access (will redirect to auth)
 curl -k -I https://{instance_ip}/{app_name}/
@@ -593,17 +1066,120 @@ curl -k https://{instance_ip}/{app_name}/api/
    - Document what you set up so I can maintain it later
    - Note any port changes, configuration modifications, etc.
 
+---
+
+## Quick Reference: Port Allocation Decision Tree
+
+```
+START
+  ↓
+Check running containers: docker ps --format "table {{{{.Ports}}}}"
+  ↓
+Are default ports (3000, 8000, 5432) free?
+  ↓
+YES → Use default ports, skip to Step 7 (Deploy)
+  ↓
+NO → Find next available ports (increment by 1)
+  ↓
+Update docker-compose.yml with sed commands
+  ↓
+📝 WRITE DOWN YOUR PORTS! You'll need them for nginx
+  ↓
+Continue to Step 7 (Deploy)
+```
+
+---
+
+## Common Mistakes to Avoid
+
+### ❌ Mistake 1: Forgetting to check ports
+**Result:** Docker fails with "address already in use"
+**Fix:** Always run `docker ps --format "table {{{{.Ports}}}}"` first
+
+### ❌ Mistake 2: Using wrong port in nginx
+**Result:** Frontend shows "Cannot connect to backend"
+**Fix:** Use the ACTUAL ports from your docker-compose.yml, not example ports
+
+### ❌ Mistake 3: Forgetting API location block
+**Result:** Frontend loads but API calls fail with 404
+**Fix:** Add BOTH frontend AND API location blocks to nginx
+
+### ❌ Mistake 4: Changing container port (right side)
+**Result:** Containers fail to communicate internally
+**Fix:** Only change HOST port (left side): `"3002:3000"` not `"3000:3002"`
+
+### ❌ Mistake 5: Not reloading nginx after changes
+**Result:** Changes don't take effect
+**Fix:** Always run `sudo systemctl reload nginx` after config changes
+
+### ❌ Mistake 6: Modifying LOCAL files with cloud URLs
+**Result:** Local development breaks after deployment
+**Fix:** Only make cloud URL changes ON THE SERVER, keep local files using localhost
+
+---
+
 ## Troubleshooting Guide
+
+### ⚠️ Page loads without CSS (looks like 1990s webpage)
+
+**Problem:** Next.js page loads but has NO styling - looks like plain HTML.
+
+**Root Cause:** Static assets (_next/static/) require special nginx configuration without auth.
+
+**Solution Checklist:**
+1. ✅ Check if static location block exists:
+   ```bash
+   sudo grep -A5 "{app_name}/_next/static" /etc/nginx/sites-available/auth-gateway
+   ```
+
+2. ✅ If missing, add it (see Step 8b)
+
+3. ✅ Check nginx logs for CSS requests:
+   ```bash
+   sudo grep "_next/static/css" /var/log/nginx/access.log | tail -5
+   ```
+   - HTTP 200 = Good
+   - HTTP 302 = Missing static block (add Step 8b)
+   - HTTP 404 = Wrong basePath in build (rebuild required)
+
+4. ✅ If HTTP 404, rebuild with correct config:
+   ```bash
+   cd /home/{Config.EC2_USER}/deployments/{app_name}
+   sg docker -c 'docker compose build --no-cache dashboard'
+   sg docker -c 'docker compose up -d'
+   ```
+
+---
 
 ### "Cannot connect to backend" in dashboard
 
 **Problem:** Frontend loads but shows offline/cannot connect to backend.
 
-**Solution:**
-1. Verify API location block exists in nginx
-2. Check `NEXT_PUBLIC_API_URL` in dashboard build uses public HTTPS URL
-3. Rebuild dashboard: `docker-compose build dashboard && docker-compose up -d dashboard`
-4. Check backend is accessible: `curl http://localhost:8000/api/`
+**Root Cause:** Usually the API location block is missing OR using wrong port in nginx.
+
+**Solution Checklist:**
+1. ✅ Check API location block exists in nginx:
+   ```bash
+   sudo grep -A10 "location /{app_name}/api/" /etc/nginx/sites-available/auth-gateway
+   ```
+
+2. ✅ Verify nginx backend port matches docker-compose.yml:
+   ```bash
+   # Check what port backend is actually using
+   docker ps | grep backend
+   # Compare with nginx config
+   sudo grep "proxy_pass.*{app_name}" /etc/nginx/sites-available/auth-gateway
+   ```
+
+3. ✅ Check backend is accessible locally (use YOUR port):
+   ```bash
+   curl http://localhost:YOUR_BACKEND_PORT/api/
+   ```
+
+4. ✅ Rebuild dashboard if NEXT_PUBLIC_API_URL was wrong:
+   ```bash
+   docker-compose build dashboard && docker-compose up -d dashboard
+   ```
 
 ### "Cannot GET /{app_name}/"
 
@@ -651,38 +1227,159 @@ sg docker -c 'docker-compose up -d'
 # Or reconnect SSH session for group membership to take effect
 ```
 
-## Post-Deployment Report
+## 🔄 Post-Deployment: Return to Localhost (MANDATORY)
 
-After deployment, report back:
-1. ✅ Application URL: https://{instance_ip}/{app_name}/
-2. ✅ Service status (all containers running)
-3. ✅ Ports used (frontend, backend, database, etc.)
-4. ✅ Backend connectivity verified (not showing "System Offline")
-5. ❓ Any issues encountered and how they were resolved
-6. 📝 Commands to manage the app:
-   ```bash
-   # Check status
-   cd /home/{Config.EC2_USER}/deployments/{app_name} && docker-compose ps
+**CRITICAL: Before ending this session, you MUST restore local files for local development!**
 
-   # View logs
-   docker-compose logs -f
+### Checklist - Verify ALL of these on LOCAL machine:
 
-   # Restart services
-   sg docker -c 'docker-compose restart'
+#### 1. docker-compose.yml - URLs must be localhost:
+```yaml
+# ✅ CORRECT for local development:
+- NEXT_PUBLIC_API_URL=http://localhost:8000/api
 
-   # Stop services
-   sg docker -c 'docker-compose down'
+# ❌ WRONG - this is for SERVER only:
+- NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
+```
 
-   # Start services
-   sg docker -c 'docker-compose up -d'
-   ```
+#### 2. docker-compose.yml - Remove deployment-specific container names:
+```yaml
+# ✅ CORRECT for local development (generic or omitted):
+container_name: backend
+container_name: dashboard
+# OR simply remove container_name lines entirely
+
+# ❌ WRONG - deployment-specific names should be on SERVER only:
+container_name: {app_name}-backend
+container_name: {app_name}-dashboard
+```
+
+#### 3. next.config.js - Remove basePath for local dev:
+```javascript
+// ✅ CORRECT for local development:
+const nextConfig = {{
+  reactStrictMode: true,
+  // No basePath or assetPrefix for local dev
+}}
+
+// ❌ WRONG - basePath is for SERVER only:
+basePath: '/{app_name}',
+assetPrefix: '/{app_name}',
+```
+
+### Quick Fix Commands (run on LOCAL machine):
+```bash
+# Check for deployment-specific names
+grep -n "container_name:" docker-compose.yml
+
+# Check for cloud URLs
+grep -n "{instance_ip}" docker-compose.yml
+
+# Check next.config.js
+grep -n "basePath" dashboard/next.config.js
+```
+
+**⚠️ DO NOT end this session until local files are clean for local development!**
+
+---
+
+## 📋 FINAL STEP: Display Deployment Completion Summary
+
+**After deployment is complete, display this summary to the user:**
+
+```
+════════════════════════════════════════════════════════════════════════════════
+                        ✅ DEPLOYMENT COMPLETE
+════════════════════════════════════════════════════════════════════════════════
+
+  App Name: {app_name}
+  Deployment Mode: {'🔄 UPDATE' if is_update else '🆕 NEW deployment'}
+  Completed: [current timestamp]
+
+────────────────────────────────────────────────────────────────────────────────
+  WHAT WAS DEPLOYED
+────────────────────────────────────────────────────────────────────────────────
+
+  [Fill in actual values from deployment:]
+  • Frontend: [framework] on port [actual port]
+  • Backend: [framework] on port [actual port]
+  • Database: [type] on port [actual port]
+  • Total containers: [count]
+
+────────────────────────────────────────────────────────────────────────────────
+  ACCESS YOUR APPLICATION
+────────────────────────────────────────────────────────────────────────────────
+
+  🌐 Public URL:     https://{instance_ip}/{app_name}/
+  🔌 API Endpoint:   https://{instance_ip}/{app_name}/api/
+  📊 Monitor:        https://{instance_ip}/deploy/activity
+  🔐 Auth:           OAuth2 (login required)
+
+────────────────────────────────────────────────────────────────────────────────
+  CONFIGURATION APPLIED (ON SERVER)
+────────────────────────────────────────────────────────────────────────────────
+
+  ✅ Next.js basePath: '/{app_name}'
+  ✅ NEXT_PUBLIC_API_URL: https://{instance_ip}/{app_name}/api
+  ✅ Nginx frontend location: /{app_name}/
+  ✅ Nginx API location: /{app_name}/api/
+
+────────────────────────────────────────────────────────────────────────────────
+  LOCAL DEVELOPMENT STATUS (VERIFY THESE!)
+────────────────────────────────────────────────────────────────────────────────
+
+  Check local docker-compose.yml:
+  ✅ NEXT_PUBLIC_API_URL=http://localhost:8000/api (NOT cloud URL)
+  ✅ No deployment-specific container_name (or use generic names)
+  ✅ No cloud URLs anywhere in local files
+  ✅ next.config.js has NO basePath (or basePath: '')
+
+  If any of these are wrong, fix them NOW before returning to local dev!
+
+────────────────────────────────────────────────────────────────────────────────
+  MANAGEMENT COMMANDS
+────────────────────────────────────────────────────────────────────────────────
+
+  # SSH to server
+  ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+
+  # Check status
+  cd /home/{Config.EC2_USER}/deployments/{app_name} && docker-compose ps
+
+  # View logs
+  docker-compose logs -f
+
+  # Restart services
+  sg docker -c 'docker-compose restart'
+
+  # Stop services
+  sg docker -c 'docker-compose down'
+
+  # Start services
+  sg docker -c 'docker-compose up -d'
+
+────────────────────────────────────────────────────────────────────────────────
+  ISSUES ENCOUNTERED
+────────────────────────────────────────────────────────────────────────────────
+
+  [List any issues and how they were resolved, or "None"]
+
+════════════════════════════════════════════════════════════════════════════════
+  Deployment Kit ID: {timestamp} UTC
+  Generated for: {email}
+════════════════════════════════════════════════════════════════════════════════
+```
 
 ---
 
 **Generated by Deploy Portal**
-**Deployment Kit ID**: {timestamp}
+**Deployment Kit ID**: {timestamp} UTC
 **For**: {email}
 """
+
+    # Detect app framework and requirements
+    is_nextjs = app_type in ['nextjs', 'node', 'docker'] and 'next' in app_type.lower()
+    has_backend = app_type in ['docker', 'multi-service']
 
     # Enhanced config.json with app details
     config_json = json.dumps({
@@ -698,15 +1395,97 @@ After deployment, report back:
         'generated_for': email,
         'generated_at': datetime.utcnow().isoformat() + 'Z',
         'source_ip': ip,
-        'timestamp': timestamp,
-        'dashboard_api_key': dashboard_api_key
+        'timestamp': version,  # Use version format
+        'deployment_version': version,
+        'portal_version': DEPLOYMENT_VERSION,
+        'dashboard_api_key': dashboard_api_key,
+        # NEW FIELDS for framework detection
+        'app_framework': f'{app_type}' if app_type else 'unknown',
+        'has_separate_backend': has_backend,
+        'requires_nginx_static_block': is_nextjs  # True for Next.js apps
     }, indent=2)
+
+    # Generate QUICKSTART.md
+    quickstart = f"""# QUICKSTART - Deploy {app_name}
+
+## First Time: Unzip and Deploy
+
+**Step 1:** Run this in your Downloads folder:
+```bash
+unzip deployment-kit-{app_name}-{timestamp}.zip && cd deployment-kit-{app_name}-{timestamp} && cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml && echo "✅ Skill installed!"
+```
+
+**Step 2:** Move ZIP to your project and deploy:
+```bash
+cp ~/Downloads/deployment-kit-{app_name}-{timestamp}.zip ~/your-project/
+cd ~/your-project
+claude-code
+```
+
+Then type: `/deploy`
+
+Done! Your app is deployed. 🚀
+
+---
+
+## Future Deployments: Use Deploy Command
+
+Download new kit → Move to project → Type `/deploy`
+
+**What happens automatically:**
+1. ✅ Skill checks the ZIP's version
+2. ✅ If ZIP has newer skill → auto-updates itself
+3. ✅ Asks you to run `/deploy` again
+4. ✅ Deploys with the latest version
+
+---
+
+## Summary
+
+- **First time**: Unzip and deploy (installs skill, then deploy)
+- **Future**: Use deploy command (`/deploy` - auto-updates from ZIP if needed)
+
+**Kit Version**: {version} UTC
+**App URL**: https://{instance_ip}/{app_name}/
+**Generated for**: {email}
+
+---
+
+## Troubleshooting: Page Without CSS
+
+If page loads but has no styling (looks like plain HTML):
+
+```bash
+# Check nginx logs
+sudo grep "_next/static/css" /var/log/nginx/access.log | tail -5
+
+# If HTTP 302: Add static location block (see CLAUDE_PROMPT.md Step 8b)
+# If HTTP 404: Rebuild dashboard
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+sg docker -c 'docker compose build --no-cache dashboard'
+sg docker -c 'docker compose up -d'
+```
+
+---
+
+**Manual option**: See CLAUDE_PROMPT.md for step-by-step deployment.
+"""
 
     # Load automation scripts
     automation_scripts = load_automation_scripts()
 
     # Generate environment template
     env_template = generate_env_template(app_name, app_type, dashboard_api_key)
+
+    # Load and version the deployment skill
+    skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_FILE_PATH)
+    try:
+        with open(skill_path, 'r') as f:
+            skill_content = f.read()
+        # Replace version placeholder with actual version
+        skill_content = skill_content.replace('DEPLOYMENT_VERSION_PLACEHOLDER', version)
+    except FileNotFoundError:
+        skill_content = None  # Skill file optional for backward compatibility
 
     # Create zip file
     zip_buffer = io.BytesIO()
@@ -715,10 +1494,15 @@ After deployment, report back:
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         # Core files
         zf.writestr(f"{folder_name}/capsule-deploy.pem", ssh_key)
+        zf.writestr(f"{folder_name}/QUICKSTART.md", quickstart)  # Simple instructions first!
         zf.writestr(f"{folder_name}/README.md", readme)
         zf.writestr(f"{folder_name}/CLAUDE_PROMPT.md", claude_prompt)
         zf.writestr(f"{folder_name}/config.json", config_json)
         zf.writestr(f"{folder_name}/.env.example", env_template)
+
+        # Add deployment skill if available
+        if skill_content:
+            zf.writestr(f"{folder_name}/{Config.SKILL_FILE_PATH}", skill_content)
 
         # Automation scripts
         for script_name, script_content in automation_scripts.items():
@@ -844,18 +1628,21 @@ chmod 600 /path/to/this/directory/capsule-deploy.pem
 """
 
     # Create config.json
+    version = datetime.utcnow().strftime(Config.DEPLOYMENT_VERSION_FORMAT)
     config_json = f'''{{
     "ec2_host": "{instance_ip}",
     "ec2_user": "{Config.EC2_USER}",
     "ssh_key_file": "capsule-deploy.pem",
     "generated_for": "{email}",
     "generated_at": "{datetime.utcnow().isoformat()}Z",
-    "source_ip": "{ip}"
+    "source_ip": "{ip}",
+    "deployment_version": "{version}",
+    "portal_version": "{DEPLOYMENT_VERSION}"
 }}'''
 
     # Create zip file in memory
     zip_buffer = io.BytesIO()
-    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    timestamp = version  # Use version format for consistency
     folder_name = f"deployment-kit-{timestamp}"
 
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -1255,12 +2042,13 @@ def download_kit():
     if error:
         return jsonify({'error': error}), 500
 
-    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    # Use version format for ZIP filename
+    version = datetime.utcnow().strftime(Config.DEPLOYMENT_VERSION_FORMAT)
     return send_file(
         zip_buffer,
         mimetype='application/zip',
         as_attachment=True,
-        download_name=f'deployment-kit-{app_name}-{timestamp}.zip'
+        download_name=f'deployment-kit-{app_name}-{version}.zip'
     )
 
 @app.route('/deploy/activity')
@@ -1301,6 +2089,122 @@ def delete_app_endpoint(app_name):
         'message': message,
         'app_name': app_name
     })
+
+def cleanup_stale_sessions():
+    """Remove sessions older than SESSION_TIMEOUT_MINUTES"""
+    from datetime import timedelta
+    now = datetime.utcnow()
+    timeout = timedelta(minutes=Config.SESSION_TIMEOUT_MINUTES)
+
+    stale_users = [
+        user for user, session in active_deployments.items()
+        if now - session['started_at'] > timeout
+    ]
+
+    for user in stale_users:
+        del active_deployments[user]
+
+    return len(stale_users)
+
+@app.route('/api/deployment/version')
+def api_deployment_version():
+    """Return current deployment system version"""
+    return jsonify({
+        'version': DEPLOYMENT_VERSION,
+        'version_display': f'{DEPLOYMENT_VERSION} UTC',
+        'format': Config.DEPLOYMENT_VERSION_FORMAT,
+        'timezone': 'UTC',
+        'generated_at': DEPLOYMENT_VERSION
+    })
+
+@app.route('/api/deployment/active-sessions')
+def api_active_sessions():
+    """List active deployment sessions for current user or all users"""
+    email, _ = get_user_info()
+
+    # Cleanup stale sessions first
+    cleanup_stale_sessions()
+
+    # Return sessions for current user
+    user_sessions = []
+    for user, session in active_deployments.items():
+        if user == email:
+            user_sessions.append({
+                'user': user,
+                'app_name': session['app_name'],
+                'started_at': session['started_at'].isoformat() + 'Z',
+                'version': session['version']
+            })
+
+    return jsonify({
+        'sessions': user_sessions,
+        'count': len(user_sessions)
+    })
+
+@app.route('/api/deployment/register-session', methods=['POST'])
+def api_register_session():
+    """Register a new deployment session"""
+    email, _ = get_user_info()
+    data = request.get_json()
+
+    app_name = data.get('app_name')
+    version = data.get('version', DEPLOYMENT_VERSION)
+
+    if not app_name:
+        return jsonify({'error': 'app_name is required'}), 400
+
+    # Cleanup stale sessions first
+    cleanup_stale_sessions()
+
+    # Register session
+    active_deployments[email] = {
+        'app_name': app_name,
+        'started_at': datetime.utcnow(),
+        'version': version
+    }
+
+    return jsonify({
+        'success': True,
+        'message': f'Session registered for {app_name}',
+        'session': {
+            'user': email,
+            'app_name': app_name,
+            'version': version
+        }
+    })
+
+@app.route('/api/deployment/unregister-session', methods=['POST'])
+def api_unregister_session():
+    """Unregister a deployment session"""
+    email, _ = get_user_info()
+
+    if email in active_deployments:
+        session = active_deployments[email]
+        del active_deployments[email]
+        return jsonify({
+            'success': True,
+            'message': f'Session unregistered for {session["app_name"]}'
+        })
+
+    return jsonify({
+        'success': False,
+        'message': 'No active session found'
+    }), 404
+
+@app.route('/api/deployment/skill')
+def api_deployment_skill():
+    """Download the latest deployment skill file"""
+    skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_FILE_PATH)
+
+    if not os.path.exists(skill_path):
+        return jsonify({'error': 'Skill file not found'}), 404
+
+    return send_file(
+        skill_path,
+        mimetype='text/yaml',
+        as_attachment=True,
+        download_name=Config.SKILL_FILE_PATH
+    )
 
 @app.route('/deploy/health')
 def health():

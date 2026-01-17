@@ -52,6 +52,24 @@ generate_location_block() {
         "$template_file"
 }
 
+# Generate multi-service location block from template (frontend + backend)
+generate_multiservice_location_block() {
+    local app_name="$1"
+    local frontend_port="$2"
+    local backend_port="$3"
+    local template_file="$TEMPLATE_DIR/nginx-location-multiservice.conf.tmpl"
+
+    if [[ ! -f "$template_file" ]]; then
+        echo "Error: Multi-service template file not found: $template_file" >&2
+        return 1
+    fi
+
+    sed -e "s/{{APP_NAME}}/${app_name}/g" \
+        -e "s/{{FRONTEND_PORT}}/${frontend_port}/g" \
+        -e "s/{{BACKEND_PORT}}/${backend_port}/g" \
+        "$template_file"
+}
+
 # Add location block to nginx config
 add_location() {
     local app_name="$1"
@@ -68,6 +86,45 @@ add_location() {
 
     # Generate location block
     local location_block=$(generate_location_block "$app_name" "$port")
+
+    # Insert into nginx config
+    insert_location_block "$location_block"
+}
+
+# Add multi-service location block (frontend + API) to nginx config
+add_multiservice_location() {
+    local app_name="$1"
+    local frontend_port="$2"
+    local backend_port="$3"
+
+    # Check if already exists
+    if location_exists "$app_name"; then
+        echo "Error: Location block for '$app_name' already exists in nginx config" >&2
+        return 1
+    fi
+
+    # Backup first
+    backup_nginx_config
+
+    # Generate multi-service location block
+    local location_block=$(generate_multiservice_location_block "$app_name" "$frontend_port" "$backend_port")
+
+    if [[ -z "$location_block" ]]; then
+        echo "Error: Failed to generate multi-service location block" >&2
+        return 1
+    fi
+
+    echo "Adding multi-service nginx config for '$app_name':" >&2
+    echo "  - Frontend: port $frontend_port -> /$app_name/" >&2
+    echo "  - Backend:  port $backend_port -> /$app_name/api/" >&2
+
+    # Insert into nginx config
+    insert_location_block "$location_block"
+}
+
+# Helper function to insert location block into nginx config
+insert_location_block() {
+    local location_block="$1"
 
     # Find the last upstream or location block before the closing brace
     # We'll insert before the last closing brace of the server block
@@ -244,7 +301,16 @@ reload_nginx() {
 # Main command dispatcher
 case "${1:-}" in
     add)
+        # Single service: add <app_name> <port>
         add_location "$2" "$3"
+        ;;
+    add-multiservice)
+        # Multi-service (frontend + backend): add-multiservice <app_name> <frontend_port> <backend_port>
+        if [[ -z "${4:-}" ]]; then
+            echo "Error: add-multiservice requires 3 arguments: <app_name> <frontend_port> <backend_port>" >&2
+            exit 1
+        fi
+        add_multiservice_location "$2" "$3" "$4"
         ;;
     remove)
         remove_location "$2"
@@ -259,7 +325,23 @@ case "${1:-}" in
         sudo nginx -t
         ;;
     *)
-        echo "Usage: $0 {add <app_name> <port>|remove <app_name>|exists <app_name>|reload|test}" >&2
+        cat << EOF >&2
+Usage: $0 <command> [arguments]
+
+Commands:
+  add <app_name> <port>                           Add single-service nginx location
+  add-multiservice <app_name> <frontend> <backend> Add multi-service nginx location (frontend + API)
+  remove <app_name>                               Remove nginx location for app
+  exists <app_name>                               Check if location exists
+  reload                                          Reload nginx configuration
+  test                                            Test nginx configuration
+
+Examples:
+  $0 add my-app 5001                              # Single service on port 5001
+  $0 add-multiservice my-app 3002 8002            # Frontend:3002, Backend:8002
+  $0 remove my-app                                # Remove my-app config
+  $0 reload                                       # Reload nginx
+EOF
         exit 1
         ;;
 esac

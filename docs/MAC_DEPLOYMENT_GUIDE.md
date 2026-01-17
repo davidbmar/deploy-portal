@@ -1,14 +1,31 @@
-# Mac Deployment Guide - Step by Step
+# Mac Deployment Guide
 
-This guide explains **exactly** how to deploy applications from your Mac using the deployment kit and Claude Code.
+## TL;DR - Quick Version
 
-## Overview
+**First time**:
+1. Download ZIP → Extract it
+2. Run: `cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml`
 
-The deployment process has 3 simple steps:
+**Every deployment**:
+1. Move ZIP to your project folder
+2. Run Claude Code, type: `/deploy`
 
-1. **Download** the deployment kit from the web portal
-2. **Extract** the files to a location Claude Code can access
-3. **Use Claude Code** with the provided instructions to deploy
+Done! See QUICKSTART.md in your downloaded kit for details.
+
+---
+
+## Complete Guide
+
+### Two Ways to Deploy
+
+**Option 1: One-Command Deployment** (Recommended)
+- Install skill once
+- Type `/deploy` to deploy anything
+- Auto-updates itself
+
+**Option 2: Manual Deployment**
+- Copy CLAUDE_PROMPT.md to Claude each time
+- More steps, more control
 
 ---
 
@@ -62,14 +79,22 @@ The deployment process has 3 simple steps:
 
 5. **You should now see** a folder structure like this:
    ```
-   ~/Documents/claude-projects/
-   └── my-app-01-test/
-       ├── deploy-key.pem          ← SSH private key
-       ├── DEPLOY_INSTRUCTIONS.md  ← Read this!
-       ├── CLAUDE_PROMPT.txt       ← Copy this to Claude
-       ├── app-config.json         ← App configuration
-       └── README.md               ← Overview
+   ~/Documents/claude-projects/deployment-kit-my-app-20260116.143022/
+       ├── capsule-deploy.pem      ← SSH private key
+       ├── README.md               ← Quick start guide
+       ├── CLAUDE_PROMPT.md        ← Deployment instructions
+       ├── config.json             ← App configuration
+       ├── .env.example            ← Environment template
+       ├── deploy-skill.yaml       ← 🆕 Claude skill file (NEW!)
+       └── automation/             ← Deployment automation scripts
+           ├── deploy-app.sh
+           ├── nginx-register.sh
+           ├── port-allocator.sh
+           ├── registry-manager.sh
+           └── systemd-register.sh
    ```
+
+   **Important**: The `deploy-skill.yaml` file is included in the ZIP. This is what enables one-command deployment!
 
 ### Option B: Extract to Desktop (Alternative)
 
@@ -90,9 +115,178 @@ If you prefer to see your project on the desktop:
 
 ---
 
-## Step 3: Deploy with Claude Code
+## Step 3A: Deploy with Deployment Skill (Recommended)
 
-Now you'll use Claude Code to deploy your application. Claude will handle all the SSH connection, file transfers, and deployment automation.
+The deployment skill automates the entire deployment process with a single command.
+
+### 3A.1: Install the Deployment Skill (One-Time Setup)
+
+**WHERE IS THE SKILL FILE?**
+The `deploy-skill.yaml` file is **bundled inside the deployment ZIP** you downloaded. When you extract the ZIP in Step 2, the skill file is right there in the extracted folder.
+
+1. **Extract the deployment kit first** (follow Step 2 above)
+   - The ZIP contains the skill file
+   - After extraction, you'll see `deploy-skill.yaml` in the folder
+
+2. **Navigate to the extracted folder**:
+   ```bash
+   cd ~/Documents/claude-projects/deployment-kit-my-app-*/
+   # or
+   cd ~/Desktop/deployment-kit-my-app-*/
+   ```
+
+3. **Verify the skill file is there**:
+   ```bash
+   ls -la deploy-skill.yaml
+   ```
+   You should see: `-rw-r--r-- ... deploy-skill.yaml`
+
+4. **Install the skill** by copying it to Claude's skills directory:
+   ```bash
+   mkdir -p ~/.config/claude/skills
+   cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+   ```
+
+   **What this does**: Copies the skill from the extracted deployment kit to Claude Code's skills folder (`~/.config/claude/skills/`), where Claude Code looks for custom skills.
+
+5. **Verify installation**:
+   ```bash
+   ls -la ~/.config/claude/skills/deploy.yaml
+   ```
+
+   You should see the file. This is a **one-time setup** - you only need to install the skill once. Future deployment kits will auto-update the skill if there's a newer version.
+
+### 3A.2: Move Deployment Kit to Your Project
+
+1. **Navigate to your actual project directory** (where your code lives):
+   ```bash
+   cd ~/path/to/your/project
+   ```
+
+2. **Move or copy the deployment kit ZIP** to your project directory:
+   ```bash
+   cp ~/Downloads/deployment-kit-my-app-*.zip .
+   ```
+
+   **Why?** The skill scans the current directory for deployment ZIPs. Keeping the ZIP in your project directory makes it easy to deploy updates.
+
+### 3A.3: Deploy with One Command
+
+1. **Start Claude Code** in your project directory:
+   ```bash
+   cd ~/path/to/your/project
+   claude-code
+   ```
+
+2. **Run the deployment command**:
+   ```
+   /deploy
+   ```
+
+3. **The skill will automatically**:
+   - ✅ Scan for deployment kits in your directory
+   - ✅ Select the latest version by timestamp
+   - ✅ Check for portal updates (auto-update if needed)
+   - ✅ Detect concurrent deployments (warn if another Claude window is deploying)
+   - ✅ Execute the full 11-step deployment process
+   - ✅ Verify the deployment
+   - ✅ Show you the live URL
+
+### 3A.4: Example Deployment with Skill
+
+```
+You: /deploy
+
+Claude: Scanning for deployment kits...
+
+═══════════════════════════════════════════════════════════════════
+                    DEPLOYMENT KITS FOUND
+═══════════════════════════════════════════════════════════════════
+
+my-app-01:
+  1. Version 20260116.143022 (2 hours ago) [LATEST]
+  2. Version 20260115.091533 (1 day ago)
+
+───────────────────────────────────────────────────────────────────
+Auto-selected: my-app-01 (version 20260116.143022)
+───────────────────────────────────────────────────────────────────
+
+Deploy my-app-01 with version 20260116.143022? [Y/n]: Y
+
+Checking portal version... ✅ Up to date
+Checking active sessions... ✅ No conflicts
+
+Extracting deployment kit...
+Reading deployment instructions...
+
+═══════════════════════════════════════════════════════════════════
+                      DEPLOYMENT SUMMARY
+═══════════════════════════════════════════════════════════════════
+
+App: my-app-01
+Mode: 🆕 NEW deployment
+Type: Node.js + Docker
+Server: 52.43.35.1
+
+═══════════════════════════════════════════════════════════════════
+
+Proceeding with deployment...
+
+[Claude executes all 11 deployment steps automatically]
+
+✅ DEPLOYMENT COMPLETE
+
+Your app is live at: https://52.43.35.1/my-app-01/
+
+Next steps:
+- Visit your app: https://52.43.35.1/my-app-01/
+- Monitor logs: ssh -i capsule-deploy.pem ubuntu@52.43.35.1
+- View activity: https://52.43.35.1/deploy/activity
+```
+
+### 3A.5: Additional Skill Commands
+
+**Check Deployment Status**:
+```
+/deploy status
+```
+
+Shows:
+- Portal version vs your skill version
+- Active deployment sessions
+- System status
+
+**Force Skill Update**:
+```
+/deploy update
+```
+
+Manually downloads and installs the latest skill version from the portal.
+
+### 3A.6: Updating Your Deployed App
+
+When you make changes to your code:
+
+1. **Download a new deployment kit** from the portal (select "Update" mode)
+2. **Move the new ZIP** to your project directory:
+   ```bash
+   cp ~/Downloads/deployment-kit-my-app-*.zip ~/path/to/your/project/
+   ```
+3. **Run the deploy command** again:
+   ```
+   /deploy
+   ```
+
+The skill will:
+- Detect the newer ZIP by timestamp
+- Auto-select it
+- Execute an update deployment (rsync + restart)
+
+---
+
+## Step 3B: Deploy with Claude Code (Manual Method)
+
+If you prefer not to use the skill, you can still deploy manually. Claude will handle all the SSH connection, file transfers, and deployment automation.
 
 ### 3.1: Open the Claude Prompt File
 
@@ -375,6 +569,24 @@ ssh -i deploy-key.pem ubuntu@52.43.35.1 "curl http://localhost:8042"
 
 ## Summary
 
+### Using the Deployment Skill (Recommended)
+
+**The Process**:
+1. 📥 Download kit from portal
+2. 📂 Extract and install skill: `cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml`
+3. 📁 Move ZIP to your project directory
+4. 💬 Run `/deploy` in Claude Code
+5. ✅ App goes live at `https://gateway.example.com/your-app-name/`
+
+**Key Points**:
+- One-time skill installation
+- Keep deployment ZIPs in your project directory
+- Run `/deploy` from your project directory
+- Automatic version management and updates
+- Concurrent deployment detection
+
+### Using Manual Method
+
 **The Process**:
 1. 📥 Download kit from portal
 2. 📂 Extract to `~/Documents/claude-projects/your-app-name/`
@@ -385,12 +597,19 @@ ssh -i deploy-key.pem ubuntu@52.43.35.1 "curl http://localhost:8042"
 - Extract to a location Claude can access (`~/Documents` or `~/Desktop`)
 - Always `cd` into the extracted folder before starting Claude Code
 - The entire prompt from `CLAUDE_PROMPT.txt` goes to Claude
+
+### General Notes
+
 - Your IP is automatically whitelisted for 24 hours
 - Keep `deploy-key.pem` secure and private
-
-**Need Help?**
-- Check the Deploy Portal → Status page
+- Check Deploy Portal → Status page if issues occur
 - View logs in Deploy Portal → Activity
 - Re-download a fresh deployment kit if something goes wrong
+
+**Need Help?**
+- Use `/deploy status` to check system status
+- Use `/deploy update` to update the skill
+- Check the Deploy Portal → Status page
+- View logs in Deploy Portal → Activity
 
 That's it! You're ready to deploy applications from your Mac using Claude Code. 🚀

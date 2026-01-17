@@ -14,6 +14,11 @@ class Config:
     PORT_RANGE_END = 5999
     REGISTRY_FILE = '/home/ubuntu/deployments/.registry.json'
 
+    # Version management
+    DEPLOYMENT_VERSION_FORMAT = "%Y%m%d.%H%M%S"
+    SESSION_TIMEOUT_MINUTES = 30
+    SKILL_FILE_PATH = "deploy-skill.yaml"
+
     # Get AWS region from metadata
     @staticmethod
     def get_region():

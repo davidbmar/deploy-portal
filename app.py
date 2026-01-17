@@ -283,11 +283,20 @@ claude-code
 /deploy
 ```
 
+⚠️ **IMPORTANT: After typing `/deploy`, DO NOT manually execute deployment steps!**
+
+The skill runs **AUTONOMOUSLY**. Just sit back and:
+- Watch the progress
+- Respond if asked for confirmations or secrets
+- Let the skill handle everything else automatically
+
 Done! The skill will:
 - Find the deployment kit automatically
 - **Check the ZIP's skill version** (auto-updates if newer)
-- Deploy your app
+- Deploy your app completely on its own
 - Give you the live URL
+
+**Do not try to "help" by running commands - the skill does it all!**
 
 **Next time you deploy**: Just download a new kit, move the ZIP to your project, and run `/deploy` again. The skill checks the ZIP and auto-updates itself if the ZIP has a newer version.
 
@@ -351,6 +360,41 @@ I need you to deploy this project to our cloud server with automated setup.
 
     # App-specific CLAUDE_PROMPT.md with improved template
     claude_prompt = f"""{mode_header}
+
+## ⚠️ IMPORTANT: Choose Your Deployment Method
+
+You have **TWO** ways to deploy this application:
+
+### Method 1: Automated Skill (RECOMMENDED) ✅
+
+**Best for**: Normal deployments, updates, and first-time users
+
+```bash
+# In your project directory with the deployment-kit ZIP:
+claude-code
+# Then type: /deploy
+```
+
+**What happens:**
+- The `/deploy` skill runs **AUTONOMOUSLY**
+- You sit back and monitor progress
+- Only respond when prompted (confirmations, secrets, choices)
+- The skill handles all 11 steps automatically
+
+⚠️ **CRITICAL**: If you invoke `/deploy`, do NOT manually execute the steps below. Let the skill run autonomously. **STOP READING THIS FILE** and let the skill work.
+
+---
+
+### Method 2: Manual Deployment (Troubleshooting Only) 🔧
+
+**Use only if:**
+- The automated skill fails or errors
+- You need to troubleshoot a specific step
+- You want to understand the deployment process in detail
+
+**If using the manual method, continue reading from Step 0 below.**
+
+---
 
 ## CRITICAL: Local vs Cloud Configuration Rules
 

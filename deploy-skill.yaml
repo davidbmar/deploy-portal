@@ -1,8 +1,23 @@
+# ═══════════════════════════════════════════════════════════════════════
+# META-INSTRUCTIONS FOR CLAUDE CODE AI
+# ═══════════════════════════════════════════════════════════════════════
+# When this skill is invoked via `/deploy`:
+# - Execute Phases 1-6 AUTONOMOUSLY without manual step-by-step intervention
+# - Run ALL bash commands directly - do NOT ask "should I run this?"
+# - Do NOT hand control back to the user to execute steps manually
+# - Only pause for user input where EXPLICITLY stated (confirmations, secrets)
+# - Treat this as AUTOMATED ORCHESTRATION, not a manual tutorial to follow
+# - Think of yourself as a deployment robot, not a consultant
+# ═══════════════════════════════════════════════════════════════════════
+
 name: deploy
 version: DEPLOYMENT_VERSION_PLACEHOLDER
 description: |
   Intelligent deployment skill for Capsule Cloud applications with automatic
   version management, ZIP detection, and concurrent deployment protection.
+
+  AUTONOMOUS EXECUTION: This skill runs automatically when invoked with /deploy.
+  Do not manually execute steps - let the skill handle everything.
 
 commands:
   - name: deploy
@@ -10,34 +25,66 @@ commands:
     instructions: |
       # Capsule Cloud Deployment Skill
 
+      ⚠️ **CRITICAL: AUTONOMOUS EXECUTION MODE**
+
+      This is an AUTONOMOUS skill. When invoked via `/deploy`:
+      - Execute ALL phases automatically without manual step-by-step intervention
+      - Run bash commands directly - do NOT ask "should I run this command?"
+      - Only pause for user input when EXPLICITLY required (confirmations, secrets, choices)
+      - Treat this as automated orchestration, NOT a manual tutorial
+      - Do NOT hand control back to user after invoking the skill
+
+      **If you invoke this skill, let it run completely autonomously through all phases.**
+
+      ---
+
       You are an intelligent deployment assistant for Capsule Cloud. This skill helps users deploy applications with automatic version management and conflict detection.
 
-      ## Phase 1: Pre-flight Checks
+      ## Phase 1: Pre-flight Checks [AUTO-EXECUTE]
 
-      ### 1.1 Scan for Deployment Kits
-      Search the current directory for deployment ZIP files matching the pattern: `deployment-kit-*-*.zip`
+      ### 1.1 Scan for Deployment Kits [AUTO-EXECUTE]
 
+      **Action**: Automatically search the current directory for deployment ZIP files.
+
+      **Command**:
       ```bash
       find . -maxdepth 1 -name "deployment-kit-*.zip" -type f
       ```
 
-      ### 1.2 Parse ZIP Versions
-      Extract app names and versions from filenames. Format: `deployment-kit-{app-name}-{version}.zip`
+      **Expected**: List of ZIP files matching pattern `deployment-kit-*-*.zip`
+      **On success**: Proceed to parse versions
+      **On failure**: Display error "No deployment kits found" and exit
+
+      ### 1.2 Parse ZIP Versions [AUTO-EXECUTE]
+
+      **Action**: Automatically extract app names and versions from ZIP filenames.
+
+      **Format**: `deployment-kit-{app-name}-{version}.zip`
       - Version format: YYYYMMDD.HHmmss (UTC, lexicographically sortable)
       - Example: `deployment-kit-contract-manager-20260116.143022.zip`
 
-      Parse each ZIP filename and extract:
+      **Parse and extract**:
       - App name (between "deployment-kit-" and last "-")
       - Version (after last "-", before ".zip")
       - File modification time for sorting fallback
 
-      ### 1.3 Check Active Sessions
-      Query portal for concurrent deployments (if portal is reachable):
+      **On success**: Store parsed ZIPs sorted by version (descending)
+      **On failure**: Fall back to file modification time for sorting
+
+      ### 1.3 Check Active Sessions [AUTO-EXECUTE - OPTIONAL]
+
+      **Action**: Automatically query portal for concurrent deployments (gracefully skip if offline).
+
+      **Command**:
       ```bash
       curl -s https://{portal_host}/api/deployment/active-sessions
       ```
 
-      ## Phase 2: Skill Version Management (ZIP-Based Auto-Update)
+      **Expected**: JSON with active deployment sessions
+      **On success**: Store results for Phase 4 conflict check
+      **On failure**: Log "Portal unreachable, skipping session check" and continue
+
+      ## Phase 2: Skill Version Management (ZIP-Based Auto-Update) [AUTO-EXECUTE]
 
       **CRITICAL**: Always check the skill version bundled IN THE ZIP before deploying. Each deployment kit is self-updating - it contains the exact skill version needed for that deployment.
 
@@ -45,7 +92,9 @@ commands:
 
       **Timing**: Run this phase AFTER Phase 1 identifies available ZIPs, but BEFORE asking user which kit to deploy. If an update is needed, the skill will restart and re-run from Phase 1.
 
-      ### 2.1 Extract and Check ZIP Skill Version
+      ### 2.1 Extract and Check ZIP Skill Version [AUTO-EXECUTE]
+
+      **Action**: Automatically extract and compare skill versions (no user prompt needed).
 
       Identify the LATEST ZIP from Phase 1 (highest version number), then extract its bundled skill:
 
@@ -113,12 +162,13 @@ commands:
 
       **IMPORTANT**: This phase checks ONLY the ZIP's bundled skill. No portal API calls needed for version management.
 
-      ## Phase 3: ZIP Selection & Display
+      ## Phase 3: ZIP Selection & Display [AUTO-EXECUTE + USER INTERACTION]
 
-      ### 3.1 Group and Sort ZIPs
-      Group ZIPs by app name and sort by version (descending):
+      ### 3.1 Group and Sort ZIPs [AUTO-EXECUTE]
 
-      Display to user:
+      **Action**: Automatically group ZIPs by app name and sort by version (descending).
+
+      **Then display to user**:
       ```
       ═══════════════════════════════════════════════════════════════════
                           DEPLOYMENT KITS FOUND
@@ -136,11 +186,18 @@ commands:
       ───────────────────────────────────────────────────────────────────
       ```
 
-      ### 3.2 Confirm Selection
-      Ask user: "Deploy {app-name} with version {version}? [Y/n/choose different]"
+      ### 3.2 Confirm Selection [USER INTERACTION REQUIRED]
+
+      **Action**: Ask user to confirm the auto-selected deployment kit.
+
+      **Prompt**: "Deploy {app-name} with version {version}? [Y/n/choose different]"
+
+      **Handle response**:
       - Y or Enter: Proceed with auto-selected (latest)
-      - n: Cancel deployment
+      - n: Cancel deployment and exit
       - "choose different": Show numbered list and ask user to select
+
+      **This is one of the few times you should pause for user input!**
 
       ## Phase 4: Concurrent Deployment Check
 

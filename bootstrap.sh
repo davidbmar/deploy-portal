@@ -185,6 +185,23 @@ install_nginx_configs() {
     log "Nginx configurations installed"
 }
 
+fix_static_permissions() {
+    log "Fixing static file permissions..."
+
+    # Ensure nginx (www-data) can access files in /home/ubuntu/
+    # Without this, nginx gets "permission denied" even if files are 755
+    chmod 755 /home/ubuntu
+    chmod 755 /home/ubuntu/src
+
+    # Ensure static files are readable by nginx
+    if [ -d "$SCRIPT_DIR/static" ]; then
+        chmod -R 755 "$SCRIPT_DIR/static"
+        log "Static file permissions fixed (including parent directories)"
+    else
+        warn "Static directory not found at $SCRIPT_DIR/static"
+    fi
+}
+
 start_service() {
     log "Starting deploy-portal service..."
 
@@ -228,6 +245,7 @@ main() {
     initialize_data_files
     install_systemd_service
     install_nginx_configs
+    fix_static_permissions
     start_service
     verify_installation
 

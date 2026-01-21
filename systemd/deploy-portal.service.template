@@ -1,0 +1,23 @@
+[Unit]
+Description=Deploy Portal - Flask Deployment Management Application
+After=network.target oauth2-proxy.service
+Wants=oauth2-proxy.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory={{WORKING_DIRECTORY}}
+Environment="PATH={{WORKING_DIRECTORY}}/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart={{WORKING_DIRECTORY}}/venv/bin/python app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

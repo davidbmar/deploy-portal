@@ -1,0 +1,98 @@
+# AppArmor profile for deploy-portal service
+# Allows deployment operations, docker socket, nginx config
+# Denies access to sensitive system files
+
+#include <tunables/global>
+
+/home/ubuntu/src/deploy-portal/venv/bin/python3 {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/python>
+  #include <abstractions/openssl>
+
+  # Python interpreter and libraries
+  /home/ubuntu/src/deploy-portal/venv/** mr,
+  /usr/bin/python3* mr,
+  /usr/lib/python3*/** mr,
+
+  # Application code (read-only)
+  /home/ubuntu/src/deploy-portal/** r,
+  /home/ubuntu/src/deploy-portal/app.py r,
+  /home/ubuntu/src/deploy-portal/*.py r,
+
+  # Deployment directories (read-write)
+  /home/ubuntu/deployments/** rw,
+  /home/ubuntu/src/deploy-portal/automation/** rwix,
+  /home/ubuntu/src/deploy-portal/scripts/** rwix,
+
+  # Docker socket access (required for deployment)
+  /var/run/docker.sock rw,
+  /run/docker.sock rw,
+
+  # Nginx configuration (write access for domain management)
+  /etc/nginx/** rw,
+  /var/log/nginx/** rw,
+
+  # Git operations
+  /usr/bin/git ix,
+  /home/ubuntu/.gitconfig r,
+
+  # SSH keys for git operations
+  /home/ubuntu/.ssh/** r,
+  /home/ubuntu/src/deploy-portal/keys/** r,
+
+  # Temporary files
+  /tmp/** rw,
+  owner /tmp/** rw,
+  /var/tmp/** rw,
+
+  # Log files
+  /var/log/deploy-portal/** rw,
+
+  # Network access
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+  network unix stream,
+
+  # Process capabilities
+  capability net_bind_service,
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+  capability chown,
+  capability fowner,
+
+  # System commands needed for deployment
+  /usr/bin/docker ix,
+  /usr/bin/docker-compose ix,
+  /usr/bin/bash ix,
+  /bin/bash ix,
+  /usr/bin/systemctl ix,
+  /bin/systemctl ix,
+
+  # System libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+
+  # Proc filesystem
+  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/@{pid}/fd/ r,
+  @{PROC}/@{pid}/status r,
+  owner @{PROC}/@{pid}/mounts r,
+  @{PROC}/cpuinfo r,
+  @{PROC}/meminfo r,
+
+  # Deny dangerous operations
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /root/.ssh/** rw,
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny @{PROC}/sys/kernel/core_pattern w,
+  deny @{PROC}/sys/kernel/modprobe w,
+  deny /boot/** rw,
+  deny /sys/kernel/security/** rw,
+}

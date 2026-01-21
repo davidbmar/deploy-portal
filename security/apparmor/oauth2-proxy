@@ -1,0 +1,60 @@
+# AppArmor profile for oauth2-proxy service
+# Restricts access to configuration files, logs, and network only
+
+#include <tunables/global>
+
+/usr/local/bin/oauth2-proxy {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # Binary execution
+  /usr/local/bin/oauth2-proxy mr,
+
+  # Configuration files (read-only)
+  /etc/oauth2-proxy/** r,
+  /home/ubuntu/src/easy-cognito-nginx-gateway-auth/oauth2-proxy/** r,
+
+  # Log files (write access)
+  /var/log/oauth2-proxy.log w,
+  /var/log/oauth2-proxy/** rw,
+
+  # Temporary files
+  /tmp/** rw,
+  owner /tmp/** rw,
+
+  # Network access
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+
+  # Process capabilities
+  capability net_bind_service,
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+
+  # System libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+
+  # Proc filesystem (limited)
+  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/@{pid}/fd/ r,
+  owner @{PROC}/@{pid}/mounts r,
+
+  # Deny dangerous operations
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /root/** rw,
+  deny /home/*/.ssh/** rw,
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny @{PROC}/sys/kernel/core_pattern w,
+  deny @{PROC}/sys/kernel/modprobe w,
+  deny mount,
+  deny umount,
+  deny ptrace,
+}

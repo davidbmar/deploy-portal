@@ -53,6 +53,7 @@ Options:
     --deployed-by EMAIL Email of person deploying (for tracking)
     --skip-nginx        Skip nginx configuration
     --skip-systemd      Skip systemd service creation
+    --use-firecracker   Deploy using Firecracker microVM instead of Docker
     --dry-run           Show what would be done without doing it
 
 Examples:
@@ -102,6 +103,7 @@ START_CMD=""
 DEPLOYED_BY="${USER}@$(hostname)"
 SKIP_NGINX=false
 SKIP_SYSTEMD=false
+USE_FIRECRACKER=false
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -128,6 +130,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-systemd)
             SKIP_SYSTEMD=true
+            shift
+            ;;
+        --use-firecracker)
+            USE_FIRECRACKER=true
             shift
             ;;
         --dry-run)
@@ -262,8 +268,34 @@ else
     log_warning "Skipping nginx configuration (--skip-nginx)"
 fi
 
-# Step 4: Create and start systemd service
-if [[ "$SKIP_SYSTEMD" == "false" ]]; then
+# Step 4: Deploy with Firecracker or systemd
+if [[ "$USE_FIRECRACKER" == "true" ]]; then
+    log_info "Step 4/4: Deploying with Firecracker microVM..."
+
+    FIRECRACKER_WRAPPER="$(dirname "$SCRIPT_DIR")/firecracker/docker-compose-fc.sh"
+
+    if [[ ! -f "$FIRECRACKER_WRAPPER" ]]; then
+        log_error "Firecracker wrapper not found: $FIRECRACKER_WRAPPER"
+        cleanup_on_error "$APP_NAME" "firecracker_deployment"
+    fi
+
+    # Check for docker-compose.yml
+    if [[ ! -f "$APP_DIR/docker-compose.yml" ]]; then
+        log_error "docker-compose.yml not found in $APP_DIR"
+        log_info "Firecracker deployment requires docker-compose.yml"
+        cleanup_on_error "$APP_NAME" "firecracker_deployment"
+    fi
+
+    # Start Firecracker VM and deploy
+    log_info "Starting Firecracker VM..."
+    if bash "$FIRECRACKER_WRAPPER" "$APP_NAME" up; then
+        log_success "Application deployed in Firecracker microVM"
+    else
+        log_error "Failed to deploy with Firecracker"
+        cleanup_on_error "$APP_NAME" "firecracker_deployment"
+    fi
+
+elif [[ "$SKIP_SYSTEMD" == "false" ]]; then
     log_info "Step 4/4: Creating systemd service..."
 
     # Create service
@@ -288,7 +320,7 @@ if [[ "$SKIP_SYSTEMD" == "false" ]]; then
         log_success "Service started successfully"
     fi
 else
-    log_warning "Skipping systemd service creation (--skip-systemd)"
+    log_warning "Skipping service creation (--skip-systemd)"
 fi
 
 # Deployment complete

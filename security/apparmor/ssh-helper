@@ -1,0 +1,76 @@
+# AppArmor profile for ssh-helper service
+# Allows terminal access and PTY operations
+# Denies access to sensitive files
+
+#include <tunables/global>
+
+/home/ubuntu/src/deploy-portal/venv/bin/python3 {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/python>
+  #include <abstractions/openssl>
+
+  # Python interpreter and libraries
+  /home/ubuntu/src/deploy-portal/venv/** mr,
+  /usr/bin/python3* mr,
+  /usr/lib/python3*/** mr,
+
+  # Application code (read-only)
+  /home/ubuntu/src/deploy-portal/** r,
+
+  # PTY and terminal access
+  /dev/pts/* rw,
+  /dev/ptmx rw,
+  /dev/tty rw,
+
+  # SSH operations
+  /usr/bin/ssh ix,
+  /usr/bin/scp ix,
+  /home/ubuntu/.ssh/** r,
+  /home/ubuntu/src/deploy-portal/keys/** r,
+
+  # Shell access for terminal
+  /bin/bash ix,
+  /usr/bin/bash ix,
+  /bin/sh ix,
+
+  # Temporary files
+  /tmp/** rw,
+  owner /tmp/** rw,
+
+  # Log files
+  /var/log/ssh-helper/** rw,
+
+  # Network access
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+
+  # Process capabilities
+  capability net_bind_service,
+  capability setuid,
+  capability setgid,
+
+  # System libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+
+  # Proc filesystem
+  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/@{pid}/fd/ r,
+  owner @{PROC}/@{pid}/mounts r,
+
+  # Deny dangerous operations
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /root/.ssh/** rw,
+  deny /home/ubuntu/.ssh/*_rsa w,
+  deny /home/ubuntu/.ssh/*_ed25519 w,
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny @{PROC}/sys/kernel/core_pattern w,
+  deny @{PROC}/sys/kernel/modprobe w,
+  deny mount,
+  deny umount,
+}

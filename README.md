@@ -81,6 +81,46 @@ The Deploy Portal:
 
 The app will start on `http://127.0.0.1:5000`
 
+### Bootstrap Installation (Recommended)
+
+For automated setup with systemd service and nginx configuration:
+
+1. **Ensure auth gateway is set up first** (required for nginx includes)
+
+2. **Copy configuration template** (optional):
+   ```bash
+   cp config.env.example config.env
+   nano config.env
+   ```
+
+3. **Run bootstrap script**:
+   ```bash
+   ./bootstrap.sh
+   ```
+
+The bootstrap script will:
+- Create Python virtual environment
+- Install all dependencies
+- Create required directories (data, keys, logs, automation/scripts)
+- Generate SSH deployment key (if not exists)
+- Initialize data files (app-registry.json, port-registry.json)
+- Install systemd service for auto-start
+- Copy nginx configurations to modular include directories
+- Start the deploy-portal service
+
+4. **Verify installation**:
+   ```bash
+   ./tests/verify-deployment.sh
+   ```
+
+5. **Check service status**:
+   ```bash
+   sudo systemctl status deploy-portal
+   sudo journalctl -u deploy-portal -f
+   ```
+
+The deploy-portal will be accessible at `https://YOUR_IP/` (root path) or `https://YOUR_IP/deploy/`.
+
 ### nginx Configuration
 
 Add this to your nginx config (`/etc/nginx/sites-available/auth-gateway`):

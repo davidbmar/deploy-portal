@@ -1,0 +1,76 @@
+# AppArmor profile for nginx
+# Restricts to config, logs, SSL certs
+# Denies home directory writes
+
+#include <tunables/global>
+
+/usr/sbin/nginx {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # Binary execution
+  /usr/sbin/nginx mr,
+
+  # Configuration files (read-only)
+  /etc/nginx/** r,
+  /etc/ssl/** r,
+  /etc/letsencrypt/** r,
+
+  # Log files (write access)
+  /var/log/nginx/** w,
+  /var/log/nginx/* w,
+
+  # Cache and runtime files
+  /var/cache/nginx/** rw,
+  /var/lib/nginx/** rw,
+  /run/nginx.pid rw,
+  /var/run/nginx.pid rw,
+
+  # Web content (read-only)
+  /usr/share/nginx/** r,
+  /var/www/** r,
+  /home/ubuntu/deployments/**/public/** r,
+  /home/ubuntu/deployments/**/dist/** r,
+  /home/ubuntu/deployments/**/build/** r,
+
+  # Temporary files
+  /tmp/** rw,
+  owner /tmp/** rw,
+
+  # Network access
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+
+  # Process capabilities
+  capability net_bind_service,
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+  capability chown,
+
+  # System libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+
+  # Proc filesystem
+  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/@{pid}/fd/ r,
+  @{PROC}/cpuinfo r,
+  owner @{PROC}/@{pid}/mounts r,
+
+  # Deny dangerous operations
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /root/** rw,
+  deny /home/*/.ssh/** rw,
+  deny /home/ubuntu/src/** w,
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny @{PROC}/sys/kernel/core_pattern w,
+  deny @{PROC}/sys/kernel/modprobe w,
+  deny mount,
+  deny umount,
+}

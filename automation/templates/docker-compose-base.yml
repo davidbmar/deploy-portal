@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  app:
+    image: ${IMAGE_NAME:-ubuntu:22.04}
+    container_name: ${APP_NAME:-app}
+    restart: unless-stopped
+
+    # Port mapping
+    ports:
+      - "${PORT:-8080}:${CONTAINER_PORT:-8080}"
+
+    # Security hardening
+    security_opt:
+      - seccomp=/etc/seccomp/docker-default.json
+      - no-new-privileges:true
+      - apparmor=docker-default
+
+    # Drop all capabilities by default, add only what's needed
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+
+    # Additional restrictions
+    read_only: false  # Set to true if application doesn't need write access
+    tmpfs:
+      - /tmp
+      - /run
+
+    # Resource limits
+    mem_limit: ${MEM_LIMIT:-512m}
+    memswap_limit: ${MEM_LIMIT:-512m}
+    cpus: ${CPU_LIMIT:-1.0}
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Environment variables
+    environment:
+      - NODE_ENV=production
+      - PYTHONUNBUFFERED=1
+      - PORT=${CONTAINER_PORT:-8080}
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${CONTAINER_PORT:-8080}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Volumes
+    volumes:
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-${APP_NAME:-app}

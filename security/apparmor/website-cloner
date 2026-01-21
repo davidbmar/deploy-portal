@@ -1,0 +1,75 @@
+# AppArmor profile for website-cloner service
+# Allows temp storage and git operations
+# Denies dangerous operations
+
+#include <tunables/global>
+
+/home/ubuntu/src/deploy-portal/venv/bin/python3 {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/python>
+  #include <abstractions/openssl>
+
+  # Python interpreter and libraries
+  /home/ubuntu/src/deploy-portal/venv/** mr,
+  /usr/bin/python3* mr,
+  /usr/lib/python3*/** mr,
+
+  # Application code (read-only)
+  /home/ubuntu/src/deploy-portal/** r,
+
+  # Working directories
+  /home/ubuntu/deployments/** rw,
+  /home/ubuntu/clones/** rw,
+  /home/ubuntu/tmp/** rw,
+
+  # Git operations
+  /usr/bin/git ix,
+  /usr/bin/wget ix,
+  /usr/bin/curl ix,
+  /home/ubuntu/.gitconfig r,
+
+  # Temporary files
+  /tmp/** rw,
+  owner /tmp/** rw,
+  /var/tmp/** rw,
+
+  # Log files
+  /var/log/website-cloner/** rw,
+
+  # Network access
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+
+  # Process capabilities
+  capability net_bind_service,
+  capability setuid,
+  capability setgid,
+  capability dac_override,
+
+  # System libraries
+  /lib/x86_64-linux-gnu/** mr,
+  /usr/lib/x86_64-linux-gnu/** mr,
+
+  # Proc filesystem
+  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/@{pid}/fd/ r,
+  owner @{PROC}/@{pid}/mounts r,
+
+  # Deny dangerous operations
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny /root/** rw,
+  deny /home/*/.ssh/** rw,
+  deny /boot/** rw,
+  deny /sys/kernel/security/** rw,
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny @{PROC}/sys/kernel/core_pattern w,
+  deny @{PROC}/sys/kernel/modprobe w,
+  deny mount,
+  deny umount,
+}

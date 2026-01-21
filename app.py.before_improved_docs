@@ -1948,52 +1948,6 @@ def apps_catalog():
                          apps=apps,
                          running_count=running_count,
                          stopped_count=stopped_count)
-@app.route('/deploy/apps/security-review/<app_name>')
-def security_review_page(app_name):
-    """Security review page for an app"""
-    email, _ = get_user_info()
-
-    # Validate app exists
-    app_path = os.path.join('/home/ubuntu/deployments', app_name)
-    if not os.path.isdir(app_path):
-        return "App not found", 404
-
-    # Scan app for services (initialize reviews if needed)
-    try:
-        import sys
-        sys.path.insert(0, '/home/ubuntu/src/deploy-portal-security')
-        from security_review_api import get_app_services
-        import database
-
-        services = get_app_services(app_name)
-        for service in services:
-            existing = database.get_review(app_name, service)
-            if not existing:
-                database.create_or_update_review(
-                    app_name=app_name,
-                    service_name=service,
-                    status='pending'
-                )
-
-        # Update app security score
-        database.update_app_security_score(app_name)
-    except Exception as e:
-        print(f"Error initializing security reviews: {e}")
-
-    # Render template from deploy-portal-security
-    security_template_path = '/home/ubuntu/src/deploy-portal-security/security_dashboard/templates/security_review.html'
-
-    try:
-        with open(security_template_path, 'r') as f:
-            template_content = f.read()
-
-        # Simple template rendering (replace variables)
-        from flask import render_template_string
-        return render_template_string(template_content, email=email, app_name=app_name)
-    except Exception as e:
-        print(f"Error loading security review template: {e}")
-        return f"Error loading security review page: {str(e)}", 500
-
 
 @app.route('/status')
 def system_status():
@@ -2420,9 +2374,9 @@ def security_run_tests():
 @app.route("/security/apps")
 def security_apps():
     """List all apps with seccomp status"""
-    #     password = request.cookies.get("security_auth")
-    #     if password != "Admin1234!":
-    #         return jsonify({"error": "Unauthorized"}), 401
+    password = request.cookies.get("security_auth")
+    if password != "Admin1234!":
+        return jsonify({"error": "Unauthorized"}), 401
     
     import subprocess
     import yaml
@@ -2478,9 +2432,9 @@ def security_apps():
 @app.route("/security/apps/<app_name>/seccomp", methods=["POST"])
 def security_toggle_seccomp(app_name):
     """Enable or disable seccomp for an app"""
-    #     password = request.cookies.get("security_auth")
-    #     if password != "Admin1234!":
-    #     return jsonify({"error": "Unauthorized"}), 401
+    password = request.cookies.get("security_auth")
+    if password != "Admin1234!":
+        return jsonify({"error": "Unauthorized"}), 401
     
     data = request.get_json()
     enable = data.get("enable", True)
@@ -2545,9 +2499,9 @@ def security_toggle_seccomp(app_name):
 @app.route("/security/apps/<app_name>/rollback", methods=["POST"])
 def security_rollback_app(app_name):
     """Rollback app to previous configuration"""
-    #     password = request.cookies.get("security_auth")
-    #     if password != "Admin1234!":
-    #     return jsonify({"error": "Unauthorized"}), 401
+    password = request.cookies.get("security_auth")
+    if password != "Admin1234!":
+        return jsonify({"error": "Unauthorized"}), 401
     
     app_path = os.path.join("/home/ubuntu/deployments", app_name)
     docker_compose_path = os.path.join(app_path, "docker-compose.yml")
@@ -2597,7 +2551,6 @@ def security_logs():
     except Exception as e:
         return f"<h1>Error</h1><p>{str(e)}</p>"
 
-
 @app.route("/security/docs")
 def security_docs():
     """Security documentation"""
@@ -2607,255 +2560,99 @@ def security_docs():
 
     try:
         with open("/home/ubuntu/src/deploy-portal/SECURITY_IMPLEMENTATION_GUIDE.md", "r") as f:
-            md_content = f.read()
+            content = f.read()
 
-        # Better markdown to HTML conversion
+        # Basic markdown to HTML conversion
         import re
+        html_content = content
 
-        # Split into lines for processing
-        lines = md_content.split('\n')
-        html_lines = []
-        in_code_block = False
-        code_block = []
-        in_list = False
-        list_items = []
-        list_type = None
+        # Headers
+        html_content = re.sub(r'^#### (.+)$', r'<h4>\1</h4>', html_content, flags=re.MULTILINE)
+        html_content = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html_content, flags=re.MULTILINE)
+        html_content = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html_content, flags=re.MULTILINE)
+        html_content = re.sub(r'^# (.+)$', r'<h1>\1</h1>', html_content, flags=re.MULTILINE)
 
-        for i, line in enumerate(lines):
-            # Handle code blocks
-            if line.startswith('```'):
-                if in_code_block:
-                    # End code block
-                    html_lines.append('<pre><code>' + '\n'.join(code_block) + '</code></pre>')
-                    code_block = []
-                    in_code_block = False
-                else:
-                    # Start code block
-                    in_code_block = True
-                continue
+        # Code blocks
+        html_content = re.sub(r'```bash([\s\S]*?)```', r'<pre><code>\1</code></pre>', html_content)
+        html_content = re.sub(r'```([\s\S]*?)```', r'<pre><code>\1</code></pre>', html_content)
 
-            if in_code_block:
-                code_block.append(line)
-                continue
+        # Inline code
+        html_content = re.sub(r'`([^`]+)`', r'<code>\1</code>', html_content)
 
-            # Handle lists
-            numbered_match = re.match(r'^(\d+)\.\s+(.+)$', line)
-            bullet_match = re.match(r'^[-*]\s+(.+)$', line)
+        # Bold
+        html_content = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html_content)
 
-            if numbered_match or bullet_match:
-                if not in_list:
-                    in_list = True
-                    list_type = 'ol' if numbered_match else 'ul'
-                    list_items = []
+        # Lists
+        html_content = re.sub(r'^- (.+)$', r'<li>\1</li>', html_content, flags=re.MULTILINE)
+        html_content = re.sub(r'(<li>.*?</li>)', r'<ul>\1</ul>', html_content, flags=re.DOTALL)
 
-                item_text = numbered_match.group(2) if numbered_match else bullet_match.group(1)
-                # Process inline formatting
-                item_text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', item_text)
-                item_text = re.sub(r'`([^`]+)`', r'<code>\1</code>', item_text)
-                list_items.append(f'<li>{item_text}</li>')
-            else:
-                # End list if we were in one
-                if in_list:
-                    html_lines.append(f'<{list_type}>')
-                    html_lines.extend(list_items)
-                    html_lines.append(f'</{list_type}>')
-                    in_list = False
-                    list_items = []
-                    list_type = None
-
-                # Skip empty lines but preserve some spacing
-                if not line.strip():
-                    if html_lines and html_lines[-1] != '<br>':
-                        html_lines.append('<br>')
-                    continue
-
-                # Headers
-                if line.startswith('####'):
-                    html_lines.append(f'<h4>{line[5:].strip()}</h4>')
-                elif line.startswith('###'):
-                    html_lines.append(f'<h3>{line[4:].strip()}</h3>')
-                elif line.startswith('##'):
-                    html_lines.append(f'<h2>{line[3:].strip()}</h2>')
-                elif line.startswith('#'):
-                    html_lines.append(f'<h1>{line[2:].strip()}</h1>')
-                else:
-                    # Regular paragraph
-                    processed = line
-                    # Inline formatting
-                    processed = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', processed)
-                    processed = re.sub(r'`([^`]+)`', r'<code>\1</code>', processed)
-                    html_lines.append(f'<p>{processed}</p>')
-
-        # Close any remaining list
-        if in_list:
-            html_lines.append(f'<{list_type}>')
-            html_lines.extend(list_items)
-            html_lines.append(f'</{list_type}>')
-
-        html_content = '\n'.join(html_lines)
+        # Line breaks
+        html_content = html_content.replace('\n\n', '<br><br>')
 
         html_template = """<!DOCTYPE html>
 <html>
 <head>
-    <title>Security Implementation Guide</title>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Documentation</title>
     <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-            line-height: 1.7;
-            color: #333;
-            background: #f5f7fa;
-            padding: 20px;
-        }}
-        .container {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
             max-width: 900px;
             margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .content {{
             background: white;
-            padding: 50px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }}
-        .back-link {{
-            display: inline-block;
-            margin-bottom: 30px;
-            padding: 10px 20px;
-            background: #3498db;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: 500;
-            transition: background 0.3s;
-        }}
-        .back-link:hover {{
-            background: #2980b9;
-        }}
-        h1 {{
-            color: #1a1a1a;
-            font-size: 2.5em;
-            margin: 30px 0 20px 0;
-            padding-bottom: 15px;
-            border-bottom: 4px solid #3498db;
-        }}
-        h2 {{
-            color: #2c3e50;
-            font-size: 1.8em;
-            margin: 40px 0 15px 0;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #ecf0f1;
-        }}
-        h3 {{
-            color: #34495e;
-            font-size: 1.4em;
-            margin: 30px 0 12px 0;
-        }}
-        h4 {{
-            color: #7f8c8d;
-            font-size: 1.1em;
-            margin: 20px 0 10px 0;
-            font-weight: 600;
-        }}
-        p {{
-            margin: 12px 0;
-            line-height: 1.8;
-        }}
-        br {{
-            display: block;
-            margin: 8px 0;
-            content: "";
-        }}
+        h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; margin-top: 20px; }}
+        h2 {{ color: #34495e; margin-top: 30px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }}
+        h3 {{ color: #7f8c8d; margin-top: 25px; }}
+        h4 {{ color: #95a5a6; margin-top: 20px; }}
         code {{
             background: #f8f9fa;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
             font-size: 0.9em;
             color: #e74c3c;
-            border: 1px solid #e1e4e8;
         }}
         pre {{
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 20px;
-            border-radius: 6px;
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
             overflow-x: auto;
-            margin: 20px 0;
-            border-left: 4px solid #3498db;
+            line-height: 1.4;
+            margin: 15px 0;
         }}
         pre code {{
             background: none;
-            color: #e2e8f0;
+            color: #ecf0f1;
             padding: 0;
-            border: none;
-            font-size: 0.95em;
-            line-height: 1.5;
         }}
-        ul, ol {{
-            margin: 15px 0 15px 30px;
-            line-height: 1.8;
+        ul {{ margin-left: 20px; }}
+        li {{ margin: 8px 0; }}
+        strong {{ color: #2c3e50; }}
+        .back-link {{
+            display: inline-block;
+            margin-bottom: 20px;
+            padding: 8px 15px;
+            background: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
         }}
-        ol {{
-            counter-reset: item;
-            list-style-type: none;
-            padding-left: 0;
-        }}
-        ol > li {{
-            counter-increment: item;
-            margin: 10px 0;
-            padding-left: 35px;
-            position: relative;
-        }}
-        ol > li:before {{
-            content: counter(item) ".";
-            position: absolute;
-            left: 0;
-            font-weight: 700;
-            color: #3498db;
-            font-size: 1.1em;
-        }}
-        ul {{
-            list-style-type: none;
-        }}
-        ul > li {{
-            margin: 10px 0;
-            padding-left: 25px;
-            position: relative;
-        }}
-        ul > li:before {{
-            content: "•";
-            position: absolute;
-            left: 0;
-            color: #3498db;
-            font-size: 1.3em;
-            line-height: 1.2;
-        }}
-        li {{
-            margin: 8px 0;
-        }}
-        strong {{
-            color: #2c3e50;
-            font-weight: 600;
-        }}
-        .content {{
-            animation: fadeIn 0.5s;
-        }}
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(20px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
+        .back-link:hover {{ background: #2980b9; }}
     </style>
 </head>
 <body>
-    <div class='container'>
+    <div class='content'>
         <a href='/security' class='back-link'>← Back to Security Dashboard</a>
-        <div class='content'>
-            {content}
-        </div>
+        {content}
     </div>
 </body>
 </html>"""
@@ -2863,21 +2660,7 @@ def security_docs():
         return html_template.format(content=html_content)
 
     except Exception as e:
-        import traceback
-        return f"<h1>Error</h1><p>Could not load documentation: {str(e)}</p><pre>{traceback.format_exc()}</pre>"
-
-
-# Import and register security review API
-try:
-    import sys
-    sys.path.insert(0, "/home/ubuntu/src/deploy-portal-security")
-    from security_review_api import security_review_bp
-    app.register_blueprint(security_review_bp)
-    print("Security Review API registered successfully")
-except ImportError as e:
-    print(f"Security Review API not installed: {e}")
-except Exception as e:
-    print(f"Error loading Security Review API: {e}")
+        return f"<h1>Error</h1><p>Could not load documentation: {str(e)}</p>"
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=False)

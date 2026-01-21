@@ -87,6 +87,7 @@
                 {% if app.url %}
                 <a href="{{ app.url }}" target="_blank" class="btn btn-secondary btn-sm">Open App</a>
                 {% endif %}
+                <a href="/deploy/apps/security-review/{{ app.name }}" class="btn btn-primary btn-sm">🔒 Security Review</a>
                 <button onclick="viewLogs('{{ app.name }}')" class="btn btn-secondary btn-sm">View Logs</button>
                 <button onclick="deleteApp('{{ app.name }}')" class="btn btn-danger btn-sm">Delete</button>
             </div>

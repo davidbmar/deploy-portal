@@ -84,7 +84,7 @@ const nextConfig = {
   output: 'standalone',
   basePath: '/{{APP_NAME}}',
   assetPrefix: '/{{APP_NAME}}',
-  trailingSlash: true,
+  // trailingSlash: false  // Default - only enable if app code handles it
 }
 
 module.exports = nextConfig
@@ -106,7 +106,7 @@ EOF
 **Why is this needed?**
 - `basePath` tells Next.js the app is served from `/{{APP_NAME}}/` not `/`
 - `assetPrefix` ensures static assets load from correct path
-- `trailingSlash: true` ensures URLs work with trailing slashes (nginx standard)
+- `trailingSlash: false` (default) - only enable if app code handles trailing slash logic
 - `NEXT_PUBLIC_API_URL` must use the public HTTPS URL, not localhost
 
 ### Step 6: Handle Port Conflicts
@@ -324,7 +324,7 @@ curl -k https://{{HOST}}/{{APP_NAME}}/api/
 
 **Solution:**
 1. For Next.js: Verify `basePath: '/{{APP_NAME}}'` in next.config.js
-2. Verify `trailingSlash: true` in next.config.js
+2. Verify Next.js config (basePath, assetPrefix) - DO NOT add trailingSlash unless app handles it
 3. Rebuild dashboard with correct basePath
 4. Check nginx proxy_pass doesn't have trailing slash
 

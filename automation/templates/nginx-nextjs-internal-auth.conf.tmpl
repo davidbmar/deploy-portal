@@ -1,0 +1,93 @@
+# Nginx configuration for Next.js app with internal authentication
+# Generated for: {{APP_NAME}}
+# Framework: Next.js with basePath
+# Auth: Internal (email/password) + OAuth2 for other routes
+
+# Static assets (no auth) - CRITICAL: includes basePath for Next.js
+location /{{APP_NAME}}/_next/static/ {
+    proxy_pass http://127.0.0.1:{{FRONTEND_PORT}}/{{APP_NAME}}/_next/static/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # Cache static assets aggressively
+    proxy_cache_valid 200 60m;
+    add_header Cache-Control "public, max-age=3600, immutable";
+}
+
+# API endpoints (no outer auth - app handles internally)
+location /{{APP_NAME}}/api/ {
+    # NO auth_request - app has internal authentication
+    rewrite ^/{{APP_NAME}}/api/(.*)$ /api/$1 break;
+    proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # WebSocket and SSE support
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+    proxy_buffering off;
+}
+
+# LOGIN PAGE (no auth - users need access to login form)
+location /{{APP_NAME}}/login/ {
+    # NO auth_request
+    proxy_pass http://127.0.0.1:{{FRONTEND_PORT}}/{{APP_NAME}}/login/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # WebSocket and SSE support
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+    proxy_buffering off;
+    proxy_cache off;
+}
+
+# Exact match for /login without trailing slash
+location = /{{APP_NAME}}/login {
+    # NO auth_request
+    proxy_pass http://127.0.0.1:{{FRONTEND_PORT}}/{{APP_NAME}}/login;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    proxy_buffering off;
+    proxy_cache off;
+}
+
+# Protected: All other frontend routes (WITH OAuth2)
+location /{{APP_NAME}}/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/start?rd=$scheme://$host$request_uri;
+    
+    # Pass auth headers from OAuth2 proxy
+    auth_request_set $user $upstream_http_x_auth_request_user;
+    auth_request_set $email $upstream_http_x_auth_request_email;
+    proxy_set_header X-User $user;
+    proxy_set_header X-Email $email;
+    
+    proxy_pass http://127.0.0.1:{{FRONTEND_PORT}}/{{APP_NAME}}/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # WebSocket and SSE support
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+    proxy_buffering off;
+}

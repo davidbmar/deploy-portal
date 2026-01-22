@@ -102,6 +102,10 @@ def load_automation_scripts():
         'port-allocator.sh',
         'nginx-register.sh',
         'nginx-configure-with-validation.sh',
+        'oauth2-proxy-register.sh',
+        'pre-deploy-validate.sh',
+        'post-deploy-validate.sh',
+        'rollback.sh',
         'systemd-register.sh',
         'registry-manager.sh',
         'deploy-app.sh'
@@ -598,12 +602,21 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
   AUTOMATION SCRIPTS AVAILABLE
 ────────────────────────────────────────────────────────────────────────────────
 
+  Deployment & Validation:
+  • automation/pre-deploy-validate.sh - Pre-deployment validation (checks structure)
   • automation/deploy-app.sh - Main deployment script
+  • automation/post-deploy-validate.sh - Post-deployment validation (verifies success)
+
+  Configuration:
   • automation/nginx-register.sh - Nginx configuration
   • automation/nginx-configure-with-validation.sh - Validated nginx config (multi-service)
+  • automation/oauth2-proxy-register.sh - OAuth2 proxy configuration (no-auth apps)
   • automation/systemd-register.sh - Systemd service setup
+
+  Utilities:
   • automation/port-allocator.sh - Port conflict detection
   • automation/registry-manager.sh - App registry management
+  • automation/rollback.sh - Automated deployment rollback
 
 ────────────────────────────────────────────────────────────────────────────────
   PREREQUISITES
@@ -901,6 +914,42 @@ sg docker -c 'docker-compose logs -f'
 - If permission denied, ensure user is in docker group: `sg docker -c 'docker-compose ...'`
 - Check container logs if services fail to start: `docker-compose logs <service-name>`
 
+### Step 7.5: Validate Deployment (CRITICAL - Required Before Nginx Config)
+
+**⚠️ IMPORTANT: Always validate containers are running before configuring nginx!**
+
+```bash
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# Wait a few seconds for containers to start
+sleep 5
+
+# Check all containers are running
+sg docker -c 'docker-compose ps'
+
+# Verify containers show "Up" status
+# Expected: All services should show "Up" (not "Exit" or "Restarting")
+
+# Test local container access
+echo "Testing frontend..."
+curl -s -o /dev/null -w "Frontend: HTTP %{{http_code}}\\n" http://localhost:FRONTEND_PORT/
+
+echo "Testing backend..."
+curl -s -o /dev/null -w "Backend: HTTP %{{http_code}}\\n" http://localhost:BACKEND_PORT/docs
+
+# Expected: Frontend 200 or 404, Backend 200
+```
+
+**If validation fails:**
+- Container not running → Check logs: `docker-compose logs <service-name>`
+- Port conflicts → Verify ports in docker-compose.yml
+- Connection refused → Container may be starting, wait 10 seconds and retry
+- Build failures → Check Dockerfile and requirements
+
+**DO NOT proceed to nginx configuration until all containers are healthy!**
+
+---
+
 ### Step 8: Configure Nginx for Authenticated Access
 
 {'**⏭️ SKIP THIS STEP FOR UPDATES** - Nginx is already configured for this app.' if is_update else '**For multi-service apps (frontend + backend), you need nginx location blocks:**'}
@@ -1150,6 +1199,51 @@ sudo systemctl reload nginx
 
 </details>
 
+---
+
+### Step 8.5: Configure OAuth2 Proxy (For No-Auth Apps Only)
+
+{'**⚠️ CRITICAL FOR NO-AUTH APPS:** If auth_mode is "none", you MUST configure OAuth2 proxy skip routes!' if auth_mode == 'none' else '**This step only applies to apps with auth_mode="none"**'}
+
+**For apps with `auth_mode: "none"` (fully public access):**
+
+The OAuth2 proxy sits in front of all apps and requires authentication by default. For no-auth apps, we need to add a skip route so they're publicly accessible.
+
+```bash
+# SSH to server
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+cd ~/deployments/{app_name}
+
+# Add skip route for no-auth app
+bash automation/oauth2-proxy-register.sh add-skip-route {app_name} {auth_mode}
+
+# Verify it works
+bash automation/oauth2-proxy-register.sh test {app_name} {auth_mode}
+```
+
+**What this does:**
+- Adds `^/{app_name}/.*` pattern to oauth2_proxy skip_auth_routes
+- Restarts oauth2-proxy service
+- Tests that the app is publicly accessible
+
+**Expected output:**
+```
+✅ Added skip_auth route for {app_name}
+✅ OAuth2-proxy restarted successfully
+✅ No-auth working: https://{Config.DUCKDNS_DOMAIN}/{app_name}/ returns HTTP 200
+```
+
+**If you skip this step for a no-auth app:**
+- App will return HTTP 302 (redirect to login page)
+- Users will be forced to authenticate even though app should be public
+- Manual fix: Run the add-skip-route command above
+
+**For apps with authentication (auth_mode: "cognito" or "internal"):**
+- Skip this step - OAuth2 proxy should protect your app
+- Expected behavior: HTTP 302 redirect to login page
+
+---
+
 ### Step 9: Verify CSS Loading (CRITICAL FOR NEXT.JS)
 
 After deployment, VERIFY that CSS loads correctly:
@@ -1188,25 +1282,71 @@ sudo grep "_next/static" /var/log/nginx/access.log | tail -10
 
 ---
 
-### Step 10: Verify Deployment
+### Step 10: Comprehensive Deployment Validation
 
-**⚠️ Use YOUR allocated ports from Step 6!**
+**Use the automated validation script to verify everything works:**
+
+```bash
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# If you used automated port allocation (Step 6a), read saved ports:
+if [ -f .deployment_frontend_port ] && [ -f .deployment_backend_port ]; then
+    FRONTEND_PORT=$(cat .deployment_frontend_port)
+    BACKEND_PORT=$(cat .deployment_backend_port)
+else
+    # Otherwise, specify your ports manually
+    FRONTEND_PORT=YOUR_FRONTEND_PORT
+    BACKEND_PORT=YOUR_BACKEND_PORT
+fi
+
+# Run comprehensive validation
+bash automation/post-deploy-validate.sh {app_name} {auth_mode} $FRONTEND_PORT $BACKEND_PORT
+```
+
+**This validates:**
+- ✅ Docker containers are running
+- ✅ Local container access (frontend & backend)
+- ✅ Public HTTPS access (with correct auth behavior)
+- ✅ Static asset loading (CSS/JS)
+- ✅ Nginx configuration exists
+- ✅ OAuth2 proxy configuration (for no-auth apps)
+
+**Expected output:**
+```
+═══════════════════════════════════════════════════════════
+  Validation Summary
+═══════════════════════════════════════════════════════════
+✅ All validation checks passed!
+
+Deployment URL: https://{Config.DUCKDNS_DOMAIN}/{app_name}/
+```
+
+**If validation fails:**
+The script will show specific errors and fixes. Common issues:
+- HTTP 302 on no-auth app → Run: `bash automation/oauth2-proxy-register.sh add-skip-route {app_name} none`
+- HTTP 404 on public URL → Check nginx location blocks
+- Containers not running → Check: `docker-compose logs`
+- Rollback failed deployment → Run: `bash automation/rollback.sh {app_name}`
+
+---
+
+**Manual verification (if needed):**
 
 ```bash
 # Check all containers are running
 sg docker -c 'docker-compose ps'
 
-# Test frontend locally (use YOUR dashboard port)
-curl http://localhost:YOUR_DASHBOARD_PORT/{app_name}/
+# Test frontend locally
+curl http://localhost:$FRONTEND_PORT/{app_name}/
 
-# Test backend API locally (use YOUR backend port)
-curl http://localhost:YOUR_BACKEND_PORT/api/
+# Test backend API locally
+curl http://localhost:$BACKEND_PORT/api/
 
-# Test public HTTPS access (will redirect to auth)
-curl -k -I https://{instance_ip}/{app_name}/
+# Test public HTTPS access
+curl -k -I https://{Config.DUCKDNS_DOMAIN}/{app_name}/
 
 # Test API through nginx
-curl -k https://{instance_ip}/{app_name}/api/
+curl -k https://{Config.DUCKDNS_DOMAIN}/{app_name}/api/
 ```
 
 ## Important Rules

@@ -101,6 +101,7 @@ def load_automation_scripts():
     script_files = [
         'port-allocator.sh',
         'nginx-register.sh',
+        'nginx-configure-with-validation.sh',
         'systemd-register.sh',
         'registry-manager.sh',
         'deploy-app.sh'
@@ -220,7 +221,7 @@ PORT=8000
 # PORT=5001
 """
 
-def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new'):
+def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new', auth_mode='cognito'):
     """Generate app-specific deployment kit with automation instructions"""
     instance_ip = Config.get_instance_ip()
     # Use deployment version format (lexicographically sortable)
@@ -544,6 +545,7 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
   App Name: {app_name}
   Deployment Mode: {'🔄 UPDATE (sync changes & restart)' if is_update else '🆕 NEW deployment (fresh install)'}
   App Type: {app_type}
+  Auth Mode: {auth_mode.upper()}
   Generated: {timestamp}
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -571,7 +573,7 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
   • Frontend: [framework] on port [port]
   • Backend: [framework] on port [port]
   • Database: [type] on port [port] (if applicable)
-  • Authentication: OAuth2 protected via nginx
+  • Authentication: {'OAuth2 protected via Cognito' if auth_mode == 'cognito' else 'Internal auth (app-managed login)' if auth_mode == 'internal' else 'No authentication (fully public)'}
 
 ────────────────────────────────────────────────────────────────────────────────
   CONFIGURATION REQUIREMENTS
@@ -598,6 +600,7 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
 
   • automation/deploy-app.sh - Main deployment script
   • automation/nginx-register.sh - Nginx configuration
+  • automation/nginx-configure-with-validation.sh - Validated nginx config (multi-service)
   • automation/systemd-register.sh - Systemd service setup
   • automation/port-allocator.sh - Port conflict detection
   • automation/registry-manager.sh - App registry management
@@ -836,14 +839,49 @@ sg docker -c 'docker-compose logs -f'
 
 {'**⏭️ SKIP THIS STEP FOR UPDATES** - Nginx is already configured for this app.' if is_update else '**For multi-service apps (frontend + backend), you need nginx location blocks:**'}
 
-#### Option A: AUTOMATED (Recommended)
+#### Option A: AUTOMATED (Recommended) - Smart Deploy
 
-**Use the nginx-register.sh script from the deployment kit:**
+**Use the smart-deploy.sh script for automatic framework detection and auth configuration:**
 
 ```bash
 # Copy automation scripts to server (if not already there)
 rsync -avz -e "ssh -i capsule-deploy.pem" ./automation/ {Config.EC2_USER}@{instance_ip}:~/deployments/{app_name}/automation/
 
+# SSH to server
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+
+# Read auth mode from config.json (included in your deployment kit)
+AUTH_MODE=$(python3 -c "import json; print(json.load(open('config.json'))['auth_mode'])")
+echo "Auth Mode: $AUTH_MODE"
+
+# Run smart deployment with your ports and auth mode
+cd ~/deployments/{app_name}
+bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{instance_ip} FRONTEND_PORT BACKEND_PORT $AUTH_MODE
+
+# Example with actual ports:
+# bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{instance_ip} 3000 8000 {auth_mode}
+```
+
+**What this does automatically:**
+- Detects Next.js framework
+- Selects the correct nginx template based on auth mode:
+  * **cognito**: OAuth2 protection via Cognito (default)
+  * **internal**: Your app handles login, bypasses OAuth2 for /login and /api routes
+  * **none**: Fully public, no authentication required
+- Configures CORS automatically
+- Creates nginx location blocks for frontend and API
+- Tests and reloads nginx
+- Backs up existing config
+
+**Auth Mode: {auth_mode.upper()}** - {'Cognito OAuth2 authentication required' if auth_mode == 'cognito' else 'Internal authentication (app-managed)' if auth_mode == 'internal' else 'No authentication (fully public)'}
+
+---
+
+#### Option B: MANUAL - Traditional nginx-register.sh
+
+**If smart-deploy doesn't work, fall back to manual nginx registration:**
+
+```bash
 # SSH to server
 ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
 
@@ -859,89 +897,87 @@ bash automation/nginx-register.sh add-multiservice {app_name} DASHBOARD_PORT BAC
 bash automation/nginx-register.sh reload
 ```
 
-**What this does automatically:**
-- Creates upstream definition for frontend
-- Adds frontend location block (`/{app_name}/`)
-- Adds API location block (`/{app_name}/api/`)
-- Tests nginx config before applying
-- Backs up existing config
+**Note:** Manual method always uses Cognito OAuth2 authentication.
 
 ---
 
-#### Option B: MANUAL (If automated doesn't work)
+#### Option C: VALIDATED NGINX CONFIG (Recommended for Multi-Service Apps)
 
-**⚠️ CRITICAL: Use YOUR allocated ports from Step 6, not the defaults!**
+**Use this automated script with built-in validation to ensure nginx is configured correctly:**
 
-If you changed ports in Step 6:
-- Dashboard port: Use YOUR port (e.g., 3002 instead of 3000)
-- Backend port: Use YOUR port (e.g., 8002 instead of 8000)
+This script addresses a critical bug where nginx configuration could fail silently, causing 404 errors.
+
+**⚠️ CRITICAL: Use YOUR allocated ports from Step 6!**
+
+```bash
+# SSH to server
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+
+# Run the validated nginx configuration script
+cd ~/deployments/{app_name}
+bash automation/nginx-configure-with-validation.sh {app_name} FRONTEND_PORT BACKEND_PORT
+
+# Example with actual ports:
+# bash automation/nginx-configure-with-validation.sh {app_name} 3002 8002
+```
+
+**What this script does:**
+- ✅ Adds nginx upstream definition
+- ✅ Creates location blocks for frontend and API
+- ✅ **VALIDATES** blocks were added (checks for common sed failures)
+- ✅ Uses fallback method if config markers are missing
+- ✅ Tests nginx config before reload
+- ✅ Provides clear error messages if anything fails
+- ✅ Attempts rollback on failure
+
+**If the script succeeds, you'll see:**
+```
+✅ NGINX CONFIGURATION COMPLETE
+
+Your app is now available at:
+  https://{Config.DUCKDNS_DOMAIN}/{app_name}/
+```
+
+**If the script fails:**
+- Check the error message for specific issues
+- Nginx config will be rolled back to last backup
+- You can try the manual method below as a fallback
+
+---
+
+#### Option D: MANUAL (Last Resort - If All Automation Fails)
+
+**Only use this if Options A, B, and C all fail!**
+
+**⚠️ IMPORTANT**: The manual steps below are provided as a last resort. They may fail silently if your nginx config doesn't have the expected markers. Prefer the validated script (Option C) which handles these edge cases.
+
+If you must proceed manually, be aware that:
+- `sed` commands may fail silently if markers don't exist
+- You must manually verify location blocks were added
+- No automatic rollback if configuration is invalid
+
+<details>
+<summary>Click to expand manual nginx configuration steps</summary>
 
 #### 8a. Create upstream definition
 
-**Replace DASHBOARD_PORT with your actual dashboard port from Step 6!**
+**Replace FRONTEND_PORT with your actual frontend port from Step 6!**
 
-```bash
-# Add to end of /etc/nginx/sites-available/auth-gateway
-# ⚠️ REPLACE DASHBOARD_PORT with your actual port (e.g., 3000, 3001, 3002)
-sudo bash -c 'cat >> /etc/nginx/sites-available/auth-gateway << EOF
-
-# {app_name} upstream
-upstream {app_name}_backend {{
-    server 127.0.0.1:DASHBOARD_PORT;
-}}
-EOF'
-```
-
-**Example with actual port:**
 ```bash
 sudo bash -c 'cat >> /etc/nginx/sites-available/auth-gateway << EOF
 
 # {app_name} upstream
 upstream {app_name}_backend {{
-    server 127.0.0.1:3002;
+    server 127.0.0.1:FRONTEND_PORT;
 }}
 EOF'
 ```
 
-#### 8b. Add static assets location block (NO AUTH - MUST COME FIRST!)
-
-⚠️ **CRITICAL FOR NEXT.JS**: This block must be added BEFORE the main frontend location block!
+#### 8b. Add frontend and API location blocks
 
 ```bash
-sudo bash -c 'cat > /tmp/{app_name}-static.conf << "EOF"
-
-    # Static assets for {app_name} (no auth required)
-    location /{app_name}/_next/static/ {{
-        proxy_pass http://{app_name}_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Host \\$host;
-        proxy_cache_valid 200 60m;
-        add_header Cache-Control "public, max-age=3600, immutable";
-    }}
-EOF
-'
-
-# Insert BEFORE the main app location block
-sudo sed -i '/# Protected: {app_name}/r /tmp/{app_name}-static.conf' /etc/nginx/sites-available/auth-gateway
-```
-
-**Why no auth?**
-- Static assets (CSS/JS) don't need authentication
-- Requiring auth = OAuth redirects for every CSS file
-- Result: Page loads but displays with ZERO styling
-
-**Location block order MUST be:**
-1. `location /{app_name}/_next/static/ {{ }}` ← NO AUTH - CSS/JS
-2. `location /{app_name}/ {{ }}` ← WITH AUTH - HTML pages
-3. `location /{app_name}/api/ {{ }}` ← WITH AUTH - API
-
----
-
-#### 8c. Add frontend location block
-
-```bash
-# Add BEFORE the "# Health check endpoint" line
-sudo bash -c 'cat > /tmp/{app_name}-location.conf << "EOF"
+# Create location blocks file
+cat > /tmp/{app_name}-location.conf << "EOF"
 
     # Protected: {app_name}
     location /{app_name}/ {{
@@ -977,19 +1013,6 @@ sudo bash -c 'cat > /tmp/{app_name}-location.conf << "EOF"
     location = /{app_name} {{
         return 301 /{app_name}/;
     }}
-EOF
-
-sed -i "/# Health check endpoint/r /tmp/{app_name}-location.conf" /etc/nginx/sites-available/auth-gateway'
-```
-
-#### 8d. Add API location block (CRITICAL for frontend-backend apps)
-
-**⚠️ CRITICAL: Replace BACKEND_PORT with your actual backend port from Step 6!**
-
-```bash
-# Add API proxy location
-# ⚠️ REPLACE BACKEND_PORT with your actual port (e.g., 8000, 8001, 8002)
-sudo bash -c 'cat > /tmp/{app_name}-api-location.conf << "EOF"
 
     # API endpoint for {app_name}
     location /{app_name}/api/ {{
@@ -1004,7 +1027,7 @@ sudo bash -c 'cat > /tmp/{app_name}-api-location.conf << "EOF"
         # Rewrite to remove /{app_name} prefix
         rewrite ^/{app_name}/api/(.*)\\$ /api/\\$1 break;
 
-        # Proxy to backend API - USE YOUR BACKEND PORT!
+        # Proxy to backend API
         proxy_pass http://127.0.0.1:BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Host \\$host;
@@ -1026,20 +1049,31 @@ sudo bash -c 'cat > /tmp/{app_name}-api-location.conf << "EOF"
     }}
 EOF
 
-sed -i "/# Protected: {app_name}/r /tmp/{app_name}-api-location.conf" /etc/nginx/sites-available/auth-gateway'
+# ⚠️ WARNING: This sed command may fail silently if marker doesn't exist!
+sudo sed -i "/# Health check endpoint/r /tmp/{app_name}-location.conf" /etc/nginx/sites-available/auth-gateway
+
+# CRITICAL: Manually verify the blocks were added!
+echo "Verifying location blocks were added..."
+BLOCK_COUNT=$(sudo grep -c "location /{app_name}/" /etc/nginx/sites-available/auth-gateway)
+if [ "$BLOCK_COUNT" -lt 2 ]; then
+    echo "❌ ERROR: Location blocks were NOT added! Found $BLOCK_COUNT blocks, expected at least 2."
+    echo "This means the sed command failed. Try Option C (validated script) instead."
+    exit 1
+fi
+echo "✓ Found $BLOCK_COUNT location blocks"
 ```
 
-#### 8e. Test and reload nginx
+#### 8c. Test and reload nginx
 
 ```bash
+# Test configuration
 sudo nginx -t
+
+# If test passes, reload
 sudo systemctl reload nginx
 ```
 
-**Why do you need both locations?**
-- `/{app_name}/` serves the frontend (Next.js dashboard)
-- `/{app_name}/api/` proxies API requests to the backend
-- Without the API location, the frontend will show "Cannot connect to backend"
+</details>
 
 ### Step 9: Verify CSS Loading (CRITICAL FOR NEXT.JS)
 
@@ -1430,6 +1464,7 @@ grep -n "basePath" dashboard/next.config.js
         'app_name': app_name,
         'app_type': app_type,
         'deploy_mode': deploy_mode,
+        'auth_mode': auth_mode,
         'is_update': is_update,
         'ec2_host': instance_ip,
         'ec2_user': Config.EC2_USER,
@@ -2113,6 +2148,7 @@ def download_kit():
     app_name = request.form.get('app_name', '').lower().strip()
     app_type = request.form.get('app_type', 'other')
     deploy_mode = request.form.get('deploy_mode', 'new')  # 'new' or 'update'
+    auth_mode = request.form.get('auth_mode', 'cognito')  # 'cognito', 'internal', or 'none'
 
     # Validate app name
     if not app_name:
@@ -2127,7 +2163,7 @@ def download_kit():
         whitelist_ip(ip, email)
 
     # Generate app-specific deployment kit
-    zip_buffer, error = generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode)
+    zip_buffer, error = generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode, auth_mode)
 
     if error:
         return jsonify({'error': error}), 500

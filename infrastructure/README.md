@@ -59,7 +59,7 @@ The installation script will:
 2. Install `/usr/local/bin/capsule-nginx-manager` - Nginx management tool
 3. Install `/usr/local/bin/capsule-port-allocator` - Port allocation tool
 4. Configure `/etc/sudoers.d/capsule-deploy` - Sudo permissions
-5. Install helper scripts to `~/deployments/scripts/`
+5. Install helper scripts to `~/deployments/.scripts/`
 6. Import existing port allocations (if found)
 7. Run verification tests
 
@@ -134,13 +134,13 @@ sudo capsule-port-allocator free myapp
 - Database: Base port + 2000
 - Other services: Base port + 100
 
-### 4. Pre-Deploy Validator (`~/deployments/scripts/pre-deploy-validate.sh`)
+### 4. Pre-Deploy Validator (`~/deployments/.scripts/pre-deploy-validate.sh`)
 
 Validates project structure before deployment.
 
 **Usage:**
 ```bash
-~/deployments/scripts/pre-deploy-validate.sh /path/to/app app-name
+~/deployments/.scripts/pre-deploy-validate.sh /path/to/app app-name
 ```
 
 **Checks:**
@@ -150,13 +150,13 @@ Validates project structure before deployment.
 - API URL format is correct
 - No common configuration errors
 
-### 5. Post-Deploy Health Check (`~/deployments/scripts/post-deploy-healthcheck.sh`)
+### 5. Post-Deploy Health Check (`~/deployments/.scripts/post-deploy-healthcheck.sh`)
 
 Validates deployment health after completion.
 
 **Usage:**
 ```bash
-~/deployments/scripts/post-deploy-healthcheck.sh /path/to/app app-name [host]
+~/deployments/.scripts/post-deploy-healthcheck.sh /path/to/app app-name [host]
 ```
 
 **Checks:**
@@ -191,7 +191,7 @@ FRONTEND_PORT=$(echo "$PORTS" | grep frontend | cut -d: -f2)
 BACKEND_PORT=$(echo "$PORTS" | grep backend | cut -d: -f2)
 
 # 2. Validate before deploying
-~/deployments/scripts/pre-deploy-validate.sh ~/deployments/myapp myapp
+~/deployments/.scripts/pre-deploy-validate.sh ~/deployments/myapp myapp
 
 # 3. Deploy your app (docker-compose, etc.)
 # ... deployment steps ...
@@ -201,7 +201,7 @@ sudo capsule-nginx-manager add-multiservice myapp $FRONTEND_PORT $BACKEND_PORT
 sudo capsule-nginx-manager reload
 
 # 5. Health check
-~/deployments/scripts/post-deploy-healthcheck.sh ~/deployments/myapp myapp
+~/deployments/.scripts/post-deploy-healthcheck.sh ~/deployments/myapp myapp
 ```
 
 ## Troubleshooting
@@ -311,7 +311,7 @@ sudo ./install-infrastructure.sh
 /etc/sudoers.d/
 └── capsule-deploy              # Sudo permissions
 
-/home/ubuntu/deployments/scripts/
+/home/ubuntu/deployments/.scripts/
 ├── pre-deploy-validate.sh      # Pre-deployment validation
 └── post-deploy-healthcheck.sh  # Post-deployment health check
 ```

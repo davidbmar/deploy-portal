@@ -100,7 +100,7 @@ fi
 # Section 5: Install Helper Scripts
 log "Section 5: Installing helper scripts..."
 
-HELPER_DIR="/home/ubuntu/deployments/scripts"
+HELPER_DIR="/home/ubuntu/deployments/.scripts"
 mkdir -p "$HELPER_DIR"
 chown ubuntu:ubuntu "$HELPER_DIR"
 

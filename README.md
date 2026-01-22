@@ -135,7 +135,7 @@ This installs:
 - **Port Registry System** - Central port allocation tracking at `/var/lib/capsule-deploy/`
 - **Nginx Manager** - Automated nginx configuration tool at `/usr/local/bin/capsule-nginx-manager`
 - **Port Allocator** - Automatic port allocation at `/usr/local/bin/capsule-port-allocator`
-- **Helper Scripts** - Pre/post deployment validation at `~/deployments/scripts/`
+- **Helper Scripts** - Pre/post deployment validation at `~/deployments/.scripts/`
 - **Sudo Configuration** - Passwordless sudo for deployment tools
 
 **Verify Installation:**

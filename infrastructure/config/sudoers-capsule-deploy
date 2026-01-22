@@ -1,0 +1,3 @@
+# Allow ubuntu user to run capsule deployment tools without password
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/capsule-nginx-manager
+ubuntu ALL=(ALL) NOPASSWD: /usr/local/bin/capsule-port-allocator

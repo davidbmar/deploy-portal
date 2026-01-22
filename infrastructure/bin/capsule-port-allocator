@@ -1,0 +1,152 @@
+#!/bin/bash
+# Capsule Port Allocator - Manages port registry
+# Usage: capsule-port-allocator allocate|list|free <app-name> [services...]
+
+set -e
+
+REGISTRY="/var/lib/capsule-deploy/port-registry.json"
+LOCK_FILE="/var/lib/capsule-deploy/port-registry.lock"
+
+# Ensure registry exists
+if [ ! -f "$REGISTRY" ]; then
+    mkdir -p "$(dirname "$REGISTRY")"
+    echo '{"meta":{"last_updated":"","format_version":"1.0"},"allocations":{}}' > "$REGISTRY"
+fi
+
+# Function to find next available port starting from a base
+find_available_port() {
+    local base_port=$1
+    local port=$base_port
+
+    # Check docker ps
+    while docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"; do
+        port=$((port + 1))
+    done
+
+    # Check lsof
+    while lsof -i :${port} >/dev/null 2>&1; do
+        port=$((port + 1))
+    done
+
+    # Check registry
+    while jq -e ".allocations | .. | select(type == \"number\" and . == $port)" "$REGISTRY" >/dev/null 2>&1; do
+        port=$((port + 1))
+    done
+
+    echo $port
+}
+
+allocate_ports() {
+    local APP_NAME="$1"
+    shift
+    local SERVICES=("$@")
+
+    # Acquire lock
+    exec 200>"$LOCK_FILE"
+    flock -x 200
+
+    # Check if app already has allocations
+    if jq -e ".allocations[\"$APP_NAME\"]" "$REGISTRY" >/dev/null 2>&1; then
+        echo "⚠️  App $APP_NAME already has port allocations:"
+        jq -r ".allocations[\"$APP_NAME\"] | to_entries | .[] | \"\(.key):\(.value)\"" "$REGISTRY"
+        flock -u 200
+        return 0
+    fi
+
+    # Find highest allocated port
+    LAST_PORT=$(jq -r '.allocations | .. | select(type == "number")' "$REGISTRY" 2>/dev/null | sort -n | tail -1)
+    BASE_PORT=${LAST_PORT:-3000}
+
+    # Allocate ports for each service
+    declare -A ALLOCATED
+
+    for service in "${SERVICES[@]}"; do
+        case "$service" in
+            frontend|dashboard)
+                ALLOCATED[$service]=$(find_available_port $((BASE_PORT + 1)))
+                ;;
+            backend|api)
+                ALLOCATED[$service]=$(find_available_port $((BASE_PORT + 5000)))
+                ;;
+            database|db|postgres|mysql)
+                ALLOCATED[$service]=$(find_available_port $((BASE_PORT + 2000)))
+                ;;
+            *)
+                ALLOCATED[$service]=$(find_available_port $((BASE_PORT + 100)))
+                ;;
+        esac
+    done
+
+    # Update registry
+    TMP_FILE=$(mktemp)
+    jq --arg app "$APP_NAME" '.allocations[$app] = {}' "$REGISTRY" > "$TMP_FILE"
+
+    for service in "${!ALLOCATED[@]}"; do
+        jq --arg app "$APP_NAME" --arg svc "$service" --argjson port "${ALLOCATED[$service]}" \
+            '.allocations[$app][$svc] = $port' "$TMP_FILE" > "${TMP_FILE}.2"
+        mv "${TMP_FILE}.2" "$TMP_FILE"
+    done
+
+    # Update timestamp
+    jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.meta.last_updated = $ts' "$TMP_FILE" > "$REGISTRY"
+    rm "$TMP_FILE"
+
+    # Release lock
+    flock -u 200
+
+    # Output allocated ports
+    for service in "${!ALLOCATED[@]}"; do
+        echo "${service}:${ALLOCATED[$service]}"
+    done
+}
+
+list_allocations() {
+    if [ ! -f "$REGISTRY" ]; then
+        echo "{}"
+        return
+    fi
+
+    jq -r '.allocations | to_entries | .[] | "\(.key):" + (.value | to_entries | .[] | "\n  \(.key): \(.value)")' "$REGISTRY"
+}
+
+free_ports() {
+    local APP_NAME="$1"
+
+    # Acquire lock
+    exec 200>"$LOCK_FILE"
+    flock -x 200
+
+    # Remove from registry
+    TMP_FILE=$(mktemp)
+    jq --arg app "$APP_NAME" 'del(.allocations[$app])' "$REGISTRY" > "$TMP_FILE"
+    jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.meta.last_updated = $ts' "$TMP_FILE" > "$REGISTRY"
+    rm "$TMP_FILE"
+
+    # Release lock
+    flock -u 200
+
+    echo "✅ Freed ports for $APP_NAME"
+}
+
+case "$1" in
+    allocate)
+        APP_NAME="$2"
+        shift 2
+        allocate_ports "$APP_NAME" "$@"
+        ;;
+    list)
+        list_allocations
+        ;;
+    free)
+        free_ports "$2"
+        ;;
+    *)
+        echo "Usage: capsule-port-allocator allocate|list|free <app-name> [services...]"
+        echo ""
+        echo "Examples:"
+        echo "  capsule-port-allocator allocate myapp frontend backend database"
+        echo "  capsule-port-allocator list"
+        echo "  capsule-port-allocator free myapp"
+        exit 1
+        ;;
+esac

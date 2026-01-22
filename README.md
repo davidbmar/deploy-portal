@@ -121,6 +121,36 @@ The bootstrap script will:
 
 The deploy-portal will be accessible at `https://YOUR_IP/` (root path) or `https://YOUR_IP/deploy/`.
 
+### Infrastructure Setup (Required for Deployments)
+
+Before deploying applications, you need to install the deployment infrastructure components. These provide automated port allocation, nginx configuration, and deployment validation.
+
+**Quick Install:**
+```bash
+cd /home/ubuntu/src/deploy-portal/infrastructure
+sudo ./install-infrastructure.sh
+```
+
+This installs:
+- **Port Registry System** - Central port allocation tracking at `/var/lib/capsule-deploy/`
+- **Nginx Manager** - Automated nginx configuration tool at `/usr/local/bin/capsule-nginx-manager`
+- **Port Allocator** - Automatic port allocation at `/usr/local/bin/capsule-port-allocator`
+- **Helper Scripts** - Pre/post deployment validation at `~/deployments/scripts/`
+- **Sudo Configuration** - Passwordless sudo for deployment tools
+
+**Verify Installation:**
+```bash
+cd /home/ubuntu/src/deploy-portal/infrastructure
+./tests/verify-infrastructure.sh
+```
+
+**View Port Allocations:**
+```bash
+sudo capsule-port-allocator list
+```
+
+For detailed documentation, see [`infrastructure/README.md`](infrastructure/README.md).
+
 ### nginx Configuration
 
 Add this to your nginx config (`/etc/nginx/sites-available/auth-gateway`):
@@ -194,6 +224,20 @@ deploy-portal/
 │   ├── systemd-register.sh         # Create systemd services
 │   ├── registry-manager.sh         # Update app registry
 │   └── deploy-app.sh               # Full deployment orchestration
+│
+├── infrastructure/                 # Server infrastructure setup (NEW)
+│   ├── README.md                   # Infrastructure documentation
+│   ├── install-infrastructure.sh   # Master installation script
+│   ├── bin/                        # System-level executables
+│   │   ├── capsule-nginx-manager   # Nginx configuration manager
+│   │   └── capsule-port-allocator  # Port allocation manager
+│   ├── helpers/                    # Deployment helper scripts
+│   │   ├── pre-deploy-validate.sh  # Pre-deployment validation
+│   │   └── post-deploy-healthcheck.sh # Post-deployment health checks
+│   ├── config/                     # Configuration templates
+│   │   └── sudoers-capsule-deploy  # Sudo permissions
+│   └── tests/
+│       └── verify-infrastructure.sh # Verification tests
 │
 ├── data/                           # Application data (not in git)
 │   ├── app-registry.json           # Deployed applications registry

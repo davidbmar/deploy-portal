@@ -1,0 +1,164 @@
+#!/bin/bash
+# Capsule Nginx Manager - Runs with elevated privileges
+# Usage: capsule-nginx-manager add-multiservice|remove|reload <app-name> [args]
+
+set -e
+
+ACTION="$1"
+APP_NAME="$2"
+shift 2 2>/dev/null || true
+
+add_multiservice() {
+    local FRONTEND_PORT="$1"
+    local BACKEND_PORT="$2"
+
+    echo "=== Configuring nginx for $APP_NAME ==="
+    echo "Frontend port: $FRONTEND_PORT"
+    echo "Backend port: $BACKEND_PORT"
+
+    # Create upstream
+    mkdir -p /etc/nginx/conf.d/system-upstreams
+    cat > /etc/nginx/conf.d/system-upstreams/${APP_NAME}.conf << UPSTREAM
+# ${APP_NAME} Upstream
+upstream ${APP_NAME}_backend {
+    server 127.0.0.1:${FRONTEND_PORT};
+}
+UPSTREAM
+    echo "✅ Created upstream definition"
+
+    # Create routes
+    mkdir -p /etc/nginx/conf.d/routes
+    cat > /etc/nginx/conf.d/routes/${APP_NAME}.conf << 'ROUTES'
+# ${APP_NAME} Routes
+
+# Protected: Frontend
+location /${APP_NAME}/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/start?rd=$scheme://$host$request_uri;
+
+    auth_request_set $user $upstream_http_x_auth_request_user;
+    auth_request_set $email $upstream_http_x_auth_request_email;
+    auth_request_set $auth_cookie $upstream_http_set_cookie;
+    add_header Set-Cookie $auth_cookie;
+
+    proxy_pass http://${APP_NAME}_backend;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-User-Email $email;
+    proxy_set_header X-Auth-Request-User $user;
+
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
+    proxy_buffering off;
+    proxy_cache off;
+}
+
+location = /${APP_NAME} {
+    return 301 /${APP_NAME}/;
+}
+
+# API endpoint
+location /${APP_NAME}/api/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/start?rd=$scheme://$host$request_uri;
+
+    auth_request_set $user $upstream_http_x_auth_request_user;
+    auth_request_set $email $upstream_http_x_auth_request_email;
+
+    rewrite ^/${APP_NAME}/api/(.*)$ /api/$1 break;
+
+    proxy_pass http://127.0.0.1:${BACKEND_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-User-Email $email;
+    proxy_set_header X-Auth-Request-User $user;
+
+    add_header Access-Control-Allow-Origin $http_origin always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-API-Key" always;
+    add_header Access-Control-Allow-Credentials true always;
+
+    if ($request_method = OPTIONS) {
+        return 204;
+    }
+}
+ROUTES
+
+    # Replace ${APP_NAME} placeholder
+    sed -i "s/\${APP_NAME}/${APP_NAME}/g" /etc/nginx/conf.d/routes/${APP_NAME}.conf
+    sed -i "s/\${BACKEND_PORT}/${BACKEND_PORT}/g" /etc/nginx/conf.d/routes/${APP_NAME}.conf
+
+    echo "✅ Created route configuration"
+
+    # Add static assets block if not exists (for Next.js apps)
+    if ! grep -q "${APP_NAME}/_next/static" /etc/nginx/sites-available/auth-gateway 2>/dev/null; then
+        # Insert before /oauth2/ location
+        sed -i "/location \/oauth2\//i \    # Static assets for ${APP_NAME} (no auth)\n    location \/${APP_NAME}\/_next\/static\/ {\n        proxy_pass http:\/\/${APP_NAME}_backend;\n        proxy_http_version 1.1;\n        proxy_set_header Host \$host;\n        proxy_cache_valid 200 60m;\n        add_header Cache-Control \"public, max-age=3600, immutable\";\n    }\n" /etc/nginx/sites-available/auth-gateway
+        echo "✅ Added static assets location block"
+    fi
+
+    # Test config
+    if nginx -t 2>&1; then
+        echo "✅ Nginx configuration test passed"
+    else
+        echo "❌ Nginx configuration test failed"
+        return 1
+    fi
+}
+
+remove_app() {
+    echo "=== Removing nginx configuration for $APP_NAME ==="
+
+    rm -f /etc/nginx/conf.d/system-upstreams/${APP_NAME}.conf
+    rm -f /etc/nginx/conf.d/routes/${APP_NAME}.conf
+
+    # Remove static assets block
+    sed -i "/# Static assets for ${APP_NAME}/,+7d" /etc/nginx/sites-available/auth-gateway 2>/dev/null || true
+
+    # Test config
+    nginx -t || { echo "❌ Nginx config test failed"; return 1; }
+
+    echo "✅ Removed nginx configuration for $APP_NAME"
+}
+
+reload_nginx() {
+    if nginx -t 2>&1; then
+        systemctl reload nginx
+        echo "✅ Nginx reloaded successfully"
+    else
+        echo "❌ Nginx configuration test failed - not reloading"
+        return 1
+    fi
+}
+
+case "$ACTION" in
+    add-multiservice)
+        add_multiservice "$@"
+        ;;
+    remove)
+        remove_app
+        ;;
+    reload)
+        reload_nginx
+        ;;
+    test)
+        nginx -t
+        ;;
+    *)
+        echo "Usage: capsule-nginx-manager add-multiservice|remove|reload|test <app-name> [args]"
+        echo ""
+        echo "Examples:"
+        echo "  capsule-nginx-manager add-multiservice myapp 3021 8021"
+        echo "  capsule-nginx-manager remove myapp"
+        echo "  capsule-nginx-manager reload"
+        echo "  capsule-nginx-manager test"
+        exit 1
+        ;;
+esac

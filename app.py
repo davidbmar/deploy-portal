@@ -748,7 +748,63 @@ Default ports in docker-compose.yml:
 
 If other apps are already running on these ports, Docker will fail to start.
 
-#### 6a. Check all running containers and their ports
+#### 6a. AUTOMATED Port Allocation (Recommended)
+
+**Use this automated script to find free ports and update docker-compose.yml:**
+
+```bash
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# Automated port conflict detection and allocation
+echo "Checking for port conflicts..."
+
+# Function to find next available port
+find_free_port() {{
+    local start_port=$1
+    local port=$start_port
+    while sudo lsof -i :$port &>/dev/null || docker ps --format '{{{{.Ports}}}}' | grep -q "$port->"; do
+        port=$((port + 1))
+    done
+    echo $port
+}}
+
+# Find free ports
+FRONTEND_PORT=$(find_free_port 3000)
+BACKEND_PORT=$(find_free_port 8000)
+POSTGRES_PORT=$(find_free_port 5432)
+
+echo "Allocated ports:"
+echo "  Frontend: $FRONTEND_PORT"
+echo "  Backend:  $BACKEND_PORT"
+echo "  Postgres: $POSTGRES_PORT"
+
+# Auto-update docker-compose.yml
+sed -i "s/\"[0-9]*:3000\"/\"$FRONTEND_PORT:3000\"/g" docker-compose.yml
+sed -i "s/\"[0-9]*:8000\"/\"$BACKEND_PORT:8000\"/g" docker-compose.yml
+sed -i "s/\"[0-9]*:5432\"/\"$POSTGRES_PORT:5432\"/g" docker-compose.yml
+
+# Save ports for later use in nginx config
+echo "$FRONTEND_PORT" > .deployment_frontend_port
+echo "$BACKEND_PORT" > .deployment_backend_port
+echo "✓ Ports allocated and docker-compose.yml updated"
+
+# Verify changes
+echo ""
+echo "Verified docker-compose.yml ports:"
+grep -E '"[0-9]+:(3000|8000|5432)"' docker-compose.yml
+```
+
+**📝 Your allocated ports are saved in .deployment_frontend_port and .deployment_backend_port**
+
+---
+
+#### 6b. MANUAL Port Allocation (Alternative)
+
+<details>
+<summary>Click to expand manual port allocation steps</summary>
+
+**Step 1: Check all running containers and their ports**
 
 ```bash
 ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
@@ -770,7 +826,7 @@ my-app-test-11-backend     0.0.0.0:8000->8000/tcp
 my-app-test-11-postgres    0.0.0.0:5432->5432/tcp
 ```
 
-#### 6b. If ports are in use, update docker-compose.yml BEFORE deploying
+**Step 2: If ports are in use, update docker-compose.yml BEFORE deploying**
 
 ```bash
 cd /home/{Config.EC2_USER}/deployments/{app_name}
@@ -789,6 +845,8 @@ sed -i 's/"3000:3000"/"3002:3000"/g' docker-compose.yml
 # Verify changes were applied
 grep -E "ports:" -A1 docker-compose.yml
 ```
+
+</details>
 
 **⚠️ IMPORTANT: Port Mapping Format**
 - Format: `"HOST_PORT:CONTAINER_PORT"`
@@ -819,6 +877,14 @@ cat > .env << 'EOF'
 API_KEY=your-api-key-here
 DATABASE_URL=postgresql://user:pass@postgres:5432/dbname
 EOF
+
+# Pre-build check: Create frontend/public directory if missing
+# (Next.js Dockerfiles often expect this directory to exist)
+if [ -d "frontend" ] && [ ! -d "frontend/public" ]; then
+    echo "Creating missing frontend/public directory..."
+    mkdir -p frontend/public
+    echo "✓ Created frontend/public"
+fi
 
 # Start with docker group (handles permission issues)
 sg docker -c 'docker-compose up -d --build'
@@ -912,13 +978,22 @@ This script addresses a critical bug where nginx configuration could fail silent
 ```bash
 # SSH to server
 ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+cd ~/deployments/{app_name}
+
+# If you used automated port allocation (Step 6a), read saved ports:
+if [ -f .deployment_frontend_port ] && [ -f .deployment_backend_port ]; then
+    FRONTEND_PORT=$(cat .deployment_frontend_port)
+    BACKEND_PORT=$(cat .deployment_backend_port)
+    echo "Using saved ports: Frontend=$FRONTEND_PORT, Backend=$BACKEND_PORT"
+else
+    # Otherwise, specify your ports manually
+    FRONTEND_PORT=YOUR_FRONTEND_PORT  # e.g., 3002
+    BACKEND_PORT=YOUR_BACKEND_PORT    # e.g., 8002
+    echo "Using manual ports: Frontend=$FRONTEND_PORT, Backend=$BACKEND_PORT"
+fi
 
 # Run the validated nginx configuration script
-cd ~/deployments/{app_name}
-bash automation/nginx-configure-with-validation.sh {app_name} FRONTEND_PORT BACKEND_PORT
-
-# Example with actual ports:
-# bash automation/nginx-configure-with-validation.sh {app_name} 3002 8002
+bash automation/nginx-configure-with-validation.sh {app_name} $FRONTEND_PORT $BACKEND_PORT
 ```
 
 **What this script does:**
@@ -977,7 +1052,7 @@ EOF'
 
 ```bash
 # Create location blocks file
-cat > /tmp/{app_name}-location.conf << "EOF"
+cat > /tmp/{app_name}-location.conf << EOF
 
     # Protected: {app_name}
     location /{app_name}/ {{

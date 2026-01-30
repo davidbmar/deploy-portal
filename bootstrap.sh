@@ -186,8 +186,6 @@ install_nginx_configs() {
     log "Nginx configurations installed"
 }
 
-<<<<<<< HEAD
-=======
 fix_static_permissions() {
     log "Fixing static file permissions..."
 
@@ -205,7 +203,6 @@ fix_static_permissions() {
     fi
 }
 
->>>>>>> e344ad0175ba9e6362c6f0326477971cf0eb0720
 start_service() {
     log "Starting deploy-portal service..."
 
@@ -249,10 +246,7 @@ main() {
     initialize_data_files
     install_systemd_service
     install_nginx_configs
-<<<<<<< HEAD
-=======
     fix_static_permissions
->>>>>>> e344ad0175ba9e6362c6f0326477971cf0eb0720
     start_service
     verify_installation
 

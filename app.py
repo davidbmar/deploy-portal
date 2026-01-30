@@ -2287,6 +2287,16 @@ def get_activity_logs(limit=100):
 
 # Routes
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint - no authentication required"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'deploy-portal',
+        'version': DEPLOYMENT_VERSION,
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200
+
 @app.route('/')
 def landing_page():
     """Capsule landing page"""

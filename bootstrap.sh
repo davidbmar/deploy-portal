@@ -167,8 +167,23 @@ install_systemd_service() {
     log "Systemd service installed"
 }
 
+check_nginx_conflicts() {
+    log "Checking for nginx configuration conflicts..."
+
+    # Check for multiple default_server declarations
+    CONFLICTS=$(grep -r "listen 80 default_server" /etc/nginx/sites-enabled/ 2>/dev/null | wc -l || echo "0")
+
+    if [ "$CONFLICTS" -gt 0 ]; then
+        warn "Found $CONFLICTS conflicting default_server declarations in sites-enabled/"
+        warn "These will be removed to allow deploy-portal to work"
+    fi
+}
+
 install_nginx_configs() {
     log "Installing nginx configurations..."
+
+    # Check for conflicts first
+    check_nginx_conflicts
 
     # Create nginx include directories if they don't exist
     sudo mkdir -p /etc/nginx/conf.d/system-upstreams
@@ -176,7 +191,8 @@ install_nginx_configs() {
 
     # Remove conflicting configurations
     # auth-gateway conflicts with deploy-portal (both use port 80 default_server)
-    if [ -L /etc/nginx/sites-enabled/auth-gateway ]; then
+    # Check for both symlinks AND regular files
+    if [ -e /etc/nginx/sites-enabled/auth-gateway ]; then
         log "Removing conflicting auth-gateway configuration"
         sudo rm -f /etc/nginx/sites-enabled/auth-gateway
     fi
@@ -195,15 +211,21 @@ install_nginx_configs() {
     sudo cp "$SCRIPT_DIR/nginx/routes.conf" \
         /etc/nginx/conf.d/routes/deploy-portal.conf
 
-    # Copy main server config if it doesn't exist
-    if [ ! -f /etc/nginx/conf.d/deploy-portal-server.conf ]; then
-        if [ -f "$SCRIPT_DIR/nginx/server.conf" ]; then
-            sudo cp "$SCRIPT_DIR/nginx/server.conf" \
-                /etc/nginx/conf.d/deploy-portal-server.conf
-        fi
+    # Copy main server config (always update to ensure latest version)
+    if [ -f "$SCRIPT_DIR/nginx/server.conf" ]; then
+        log "Installing main server configuration"
+        sudo cp "$SCRIPT_DIR/nginx/server.conf" \
+            /etc/nginx/conf.d/deploy-portal-server.conf
+    else
+        error "nginx/server.conf not found in repository"
     fi
 
-    log "Nginx configurations installed"
+    # Verify nginx configuration is valid
+    if ! sudo nginx -t 2>&1 | grep -q "syntax is ok"; then
+        error "Nginx configuration test failed. Check syntax errors above."
+    fi
+
+    log "Nginx configurations installed and validated"
 }
 
 fix_static_permissions() {
@@ -239,21 +261,41 @@ start_service() {
 }
 
 verify_installation() {
-    log "Verifying installation..."
+    log "Running comprehensive verification..."
 
-    # Check if service is running
-    if ! systemctl is-active --quiet deploy-portal; then
-        error "deploy-portal service is not running"
-    fi
+    if [ -f "$SCRIPT_DIR/scripts/verify-deployment-local.sh" ]; then
+        # Run comprehensive verification script
+        bash "$SCRIPT_DIR/scripts/verify-deployment-local.sh"
 
-    # Check if app is responding
-    if curl -s http://localhost:${FLASK_PORT}/ > /dev/null; then
-        log "Deploy-portal is responding on port $FLASK_PORT"
+        if [ $? -eq 0 ]; then
+            log "Comprehensive verification passed"
+        else
+            warn "Some verification checks failed"
+            warn "Review the output above for details"
+
+            # Don't exit - let user decide if failures are acceptable
+            read -p "Continue anyway? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                error "Deployment verification failed"
+            fi
+        fi
     else
-        warn "Deploy-portal is not responding on port $FLASK_PORT"
-    fi
+        # Fallback to basic verification
+        log "Running basic verification..."
 
-    log "Verification complete"
+        if ! systemctl is-active --quiet deploy-portal; then
+            error "deploy-portal service is not running"
+        fi
+
+        if curl -s http://localhost:${FLASK_PORT}/ > /dev/null; then
+            log "Deploy-portal is responding on port $FLASK_PORT"
+        else
+            warn "Deploy-portal is not responding on port $FLASK_PORT"
+        fi
+
+        log "Basic verification complete"
+    fi
 }
 
 main() {

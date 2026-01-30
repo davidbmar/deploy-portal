@@ -33,22 +33,153 @@ git stash pop  # Re-apply local changes (if any)
 
 ## Post-Deployment Verification
 
+After running `./bootstrap.sh`, verify deployment with the comprehensive verification script:
+
+### Quick Check
 ```bash
-# Check service is running
+cd /home/ubuntu/src/deploy-portal
+./scripts/verify-deployment-local.sh
+
+# Or with your MacBook IP for specific security group testing:
+USER_MACBOOK_IP=136.62.92.204 ./scripts/verify-deployment-local.sh
+```
+
+This script checks:
+- ✅ Service status (deploy-portal running)
+- ✅ Nginx configuration (valid, no conflicts)
+- ✅ Internal access (localhost /, /deploy/, API)
+- ✅ Static file permissions
+- ✅ External access (public IP if available)
+- ✅ Security group configuration (port 80/443)
+- ✅ Port listening status
+
+### Expected Output
+
+```
+=== Deploy Portal Verification ===
+
+--- Instance Information ---
+Instance ID: i-0a1b2c3d4e5f6g7h8
+Public IP: 3.87.27.213
+Private IP: 172.31.35.229
+
+--- Service Status ---
+✓ deploy-portal service is active
+
+--- Nginx Configuration ---
+✓ nginx config syntax is valid
+✓ No nginx default_server conflicts (2 declarations)
+
+--- Internal Access Tests ---
+✓ Root path (/) accessible internally
+✓ Deploy path (/deploy/) accessible internally
+✓ Instance metadata API accessible internally
+✓ Static files (CSS) accessible
+
+--- External Access Tests ---
+✓ Root path (/) accessible externally from 3.87.27.213
+✓ Deploy path (/deploy/) accessible externally from 3.87.27.213
+⚠ HTTPS (port 443) NOT accessible (may not be configured)
+
+--- File Permissions ---
+✓ /home/ubuntu directory permissions correct (755)
+✓ Static directory permissions correct
+
+--- Port Status ---
+✓ Nginx listening on port 80
+✓ Flask app listening on port 5000
+
+--- Security Group Check ---
+✓ Security group has port 80 rule configured
+
+=== Verification Summary ===
+Passed: 14
+Failed: 0
+Warnings: 1
+
+✓ All critical tests passed!
+
+Access your deployment at:
+  → http://3.87.27.213/
+  → http://3.87.27.213/deploy/
+```
+
+### Manual Verification
+
+If the script fails, manually verify:
+
+```bash
+# 1. Service running
 sudo systemctl status deploy-portal
 
-# Check nginx configuration
-sudo nginx -t
+# 2. Internal access
+curl -I http://localhost/
+curl -I http://localhost/deploy/
 
-# Test the application
-curl -f http://localhost:5000/
+# 3. External access (replace with your public IP)
+curl -I http://3.87.27.213/
+curl -I http://3.87.27.213/deploy/
 
-# Test the deploy page
-curl -f http://localhost/deploy/ | head -20
-
-# Test instance metadata API
-curl -f http://localhost/api/instance-metadata | jq
+# 4. Security group (if external fails)
+# Check in AWS Console → EC2 → Security Groups
+# Ensure port 80 is open to your IP or 0.0.0.0/0
 ```
+
+### Troubleshooting External Access Failures
+
+If external access tests fail:
+
+**Check Security Group:**
+```bash
+# Get instance ID
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" \
+    http://169.254.169.254/latest/meta-data/instance-id)
+
+# Get security groups
+aws ec2 describe-instances \
+    --instance-ids $INSTANCE_ID \
+    --query 'Reservations[0].Instances[0].SecurityGroups'
+
+# Check port 80 rules
+aws ec2 describe-security-groups \
+    --group-ids <YOUR_SG_ID> \
+    --query 'SecurityGroups[0].IpPermissions[?ToPort==`80`]'
+```
+
+**Fix: Open port 80 in security group:**
+```bash
+aws ec2 authorize-security-group-ingress \
+    --group-id <YOUR_SG_ID> \
+    --protocol tcp \
+    --port 80 \
+    --cidr 0.0.0.0/0
+```
+
+**Or open to specific IP only:**
+```bash
+aws ec2 authorize-security-group-ingress \
+    --group-id <YOUR_SG_ID> \
+    --protocol tcp \
+    --port 80 \
+    --cidr YOUR_IP/32
+```
+
+### Quick Debug Script
+
+If external access fails, run the debug script for detailed diagnostics:
+
+```bash
+./scripts/debug-access.sh
+```
+
+This will show:
+- Instance information and public IP
+- Internal vs external access status
+- Nginx listening configuration
+- Security group rules for port 80
+- Specific troubleshooting steps
 
 ## Troubleshooting
 

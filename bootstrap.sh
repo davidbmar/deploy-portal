@@ -42,11 +42,12 @@ load_config() {
         log "Loaded config from $SCRIPT_DIR/config.env"
     else
         warn "No configuration file found, using defaults"
+        warn "For AWS features to work, run: bash scripts/configure-aws-config.sh"
     fi
 
     # Set defaults if not provided
     AWS_REGION="${AWS_REGION:-us-east-1}"
-    SECURITY_GROUP_ID="${SECURITY_GROUP_ID:-sg-0d6bbadbbd290b320}"
+    SECURITY_GROUP_ID="${SECURITY_GROUP_ID:-sg-0d485b4ffe8c8f886}"
     SSH_KEY_NAME="${SSH_KEY_NAME:-deploy-key}"
     DEPLOYMENT_ROOT="${DEPLOYMENT_ROOT:-/home/ubuntu/deployments}"
     PORT_RANGE_START="${PORT_RANGE_START:-5001}"

@@ -48,7 +48,29 @@ The Deploy Portal:
 
 ## 🚀 Quick Start
 
-### Installation
+### GitHub Deployment (Recommended)
+
+Deploy directly from GitHub repositories:
+
+```bash
+# Clone this repository
+git clone https://github.com/yourusername/deploy-portal.git
+cd deploy-portal
+
+# Run GitHub deployment script
+bash scripts/github-deploy.sh
+```
+
+The script will:
+- Clone all required repositories (deploy-portal, ssh-helper, website-cloner, security dashboard)
+- Install infrastructure dependencies
+- Bootstrap all services
+- Configure nginx
+- Optionally configure AWS settings
+
+See [GitHub Deployment Guide](docs/GITHUB_DEPLOYMENT.md) for detailed instructions.
+
+### Manual Installation
 
 1. **Clone or navigate to the directory**:
    ```bash
@@ -60,13 +82,9 @@ The Deploy Portal:
    pip install -r requirements.txt
    ```
 
-3. **Configure settings** (if needed):
+3. **Configure AWS settings**:
    ```bash
-   # Edit config.py to customize:
-   # - Security Group ID
-   # - AWS Region
-   # - Port range for apps
-   nano config.py
+   bash scripts/configure-aws-config.sh
    ```
 
 4. **Create required directories**:
@@ -253,14 +271,52 @@ deploy-portal/
 
 ## 🔧 Configuration
 
+### AWS Configuration
+
+The deploy portal requires AWS configuration to manage EC2 security groups. This is separate from your application configuration in `config.py`.
+
+**Quick Setup:**
+```bash
+cd /home/ubuntu/src/deploy-portal
+bash scripts/configure-aws-config.sh
+```
+
+This interactive script will:
+- Verify IAM role is attached to your EC2 instance
+- Prompt for AWS region, security group ID, and public IP
+- Create `~/.ec2-config.env` with secure permissions
+- Update systemd services to load the configuration
+- Test AWS connectivity
+
+**Manual Setup:**
+
+Copy the example file and edit it:
+```bash
+cp .ec2-config.env.example ~/.ec2-config.env
+nano ~/.ec2-config.env
+chmod 600 ~/.ec2-config.env
+```
+
+Required variables:
+- `AWS_REGION` - AWS region (e.g., us-east-1)
+- `SECURITY_GROUP_ID` - Security group to manage
+- `PUBLIC_IP` - Public IP of this server
+
+**Note**: AWS credentials are provided by an IAM role attached to your EC2 instance. Never store AWS access keys in configuration files.
+
+**Test Configuration:**
+```bash
+bash scripts/test-aws-config.sh
+```
+
 ### config.py
 
-Key configuration options:
+Application-specific configuration options:
 
 ```python
 class Config:
     SECRET_KEY = 'generated-secret-key'
-    SECURITY_GROUP_ID = 'sg-0d6bbadbbd290b320'  # Your security group
+    SECURITY_GROUP_ID = 'sg-0d485b4ffe8c8f886'  # Your security group
     PORT_RANGE_START = 8000  # Starting port for apps
     PORT_RANGE_END = 8999    # Ending port for apps
 
@@ -608,6 +664,31 @@ Get activity logs as JSON.
 
 ## 🐛 Troubleshooting
 
+### Issue: "unable to locate credentials" Error
+
+**Cause**: Missing AWS configuration file or IAM role not attached
+
+**Solution**:
+1. Check if `.ec2-config.env` exists:
+   ```bash
+   ls -la ~/.ec2-config.env
+   ```
+
+2. If missing, run configuration script:
+   ```bash
+   bash scripts/configure-aws-config.sh
+   ```
+
+3. Verify IAM role is attached:
+   ```bash
+   curl http://169.254.169.254/latest/meta-data/iam/security-credentials/
+   ```
+
+4. Test configuration:
+   ```bash
+   bash scripts/test-aws-config.sh
+   ```
+
 ### Issue: "Permission denied" when provisioning
 
 **Cause**: IAM role missing EC2 permissions
@@ -619,7 +700,7 @@ Get activity logs as JSON.
 aws sts get-caller-identity
 
 # Test permissions
-aws ec2 describe-security-groups --group-ids sg-0d6bbadbbd290b320
+aws ec2 describe-security-groups --group-ids sg-0d485b4ffe8c8f886
 ```
 
 ### Issue: SSH connection fails after downloading kit
@@ -635,7 +716,7 @@ aws ec2 describe-security-groups --group-ids sg-0d6bbadbbd290b320
 chmod 600 deploy-key.pem
 
 # Verify IP is whitelisted
-aws ec2 describe-security-groups --group-ids sg-0d6bbadbbd290b320 | grep "YourIP"
+aws ec2 describe-security-groups --group-ids sg-0d485b4ffe8c8f886 | grep "YourIP"
 
 # Test SSH connection
 ssh -i deploy-key.pem -v ubuntu@SERVER_IP

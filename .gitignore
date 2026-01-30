@@ -10,10 +10,11 @@ config.env
 dist/
 build/
 
-# Keys - NEVER commit these
+# Keys and Configuration - NEVER commit these
 keys/
 *.pem
 *.key
+.ec2-config.env
 
 # Data - Application state (not in version control)
 data/

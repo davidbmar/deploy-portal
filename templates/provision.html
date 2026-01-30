@@ -102,12 +102,12 @@
                                 </div>
                             </div>
                         </label>
-                        <label class="auth-option" data-mode="none">
+                        <label class="auth-option" data-mode="none" style="background: rgba(34, 197, 94, 0.1); border: 2px solid rgba(34, 197, 94, 0.4); border-radius: 6px; padding: 12px;">
                             <input type="radio" name="auth_mode" value="none" style="margin-top: 3px;" />
                             <div>
-                                <strong style="color: #ffffff;">No Auth</strong>
+                                <strong style="color: #ffffff;">No Auth <span style="color: #22c55e; font-size: 0.85em;">(Recommended for Capsule VPC)</span></strong>
                                 <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
-                                    Fully public - anyone can access without logging in. Use for demos or public apps.
+                                    Fully public - anyone can access without logging in. Use for demos or public apps within Capsule VPC.
                                 </div>
                             </div>
                         </label>
@@ -125,7 +125,7 @@
                             <div>
                                 <strong style="color: #ffffff;">Public IP <span id="public-ip-display" style="color: #3b82f6;"></span></strong>
                                 <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
-                                    Deploy to public IP - accessible from the internet
+                                    Deploy to public IP address
                                 </div>
                             </div>
                         </label>

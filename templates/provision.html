@@ -47,22 +47,22 @@
 
             <div id="deployment-mode" class="form-group" style="display: none;">
                 <label>Deployment Mode</label>
-                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107; margin: 10px 0;">
-                    <p style="margin: 0 0 10px 0;"><strong>⚠️ This app already exists!</strong></p>
+                <div style="background: rgba(251, 191, 36, 0.15); padding: 15px; border-radius: 8px; border-left: 4px solid #fbbf24; margin: 10px 0; border: 1px solid rgba(251, 191, 36, 0.3);">
+                    <p style="margin: 0 0 10px 0; color: #fbbf24;"><strong>⚠️ This app already exists!</strong></p>
                     <div style="display: flex; flex-direction: column; gap: 10px;">
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="radio" name="deploy_mode" value="update" checked />
-                            <span><strong>Update existing</strong> - Sync changes to the deployed app</span>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #d4d4d4;">
+                            <input type="radio" name="deploy_mode" value="update" checked style="accent-color: #fbbf24;" />
+                            <span><strong style="color: #ffffff;">Update existing</strong> - Sync changes to the deployed app</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="radio" name="deploy_mode" value="new" />
-                            <span><strong>New deployment</strong> - Deploy as a fresh instance</span>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #d4d4d4;">
+                            <input type="radio" name="deploy_mode" value="new" style="accent-color: #fbbf24;" />
+                            <span><strong style="color: #ffffff;">New deployment</strong> - Deploy as a fresh instance</span>
                         </label>
                     </div>
                 </div>
                 <div style="margin-top: 10px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="always-update" />
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: #d4d4d4;">
+                        <input type="checkbox" id="always-update" style="accent-color: #3b82f6;" />
                         <small>Always default to updating existing apps</small>
                     </label>
                 </div>
@@ -78,6 +78,69 @@
                     <option value="go">Go</option>
                 </select>
                 <small>Helps generate better deployment instructions</small>
+            </div>
+
+            <div class="form-group">
+                <label>Authentication Mode</label>
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 15px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); margin: 10px 0;">
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <label class="auth-option" data-mode="cognito">
+                            <input type="radio" name="auth_mode" value="cognito" checked style="margin-top: 3px;" />
+                            <div>
+                                <strong style="color: #ffffff;">Cognito Auth (Default)</strong>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
+                                    Secure OAuth2 authentication via AWS Cognito. Users must log in before accessing the app.
+                                </div>
+                            </div>
+                        </label>
+                        <label class="auth-option" data-mode="internal">
+                            <input type="radio" name="auth_mode" value="internal" style="margin-top: 3px;" />
+                            <div>
+                                <strong style="color: #ffffff;">Internal Auth</strong>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
+                                    Your app handles authentication (email/password login page). Bypasses Cognito for login routes only.
+                                </div>
+                            </div>
+                        </label>
+                        <label class="auth-option" data-mode="none">
+                            <input type="radio" name="auth_mode" value="none" style="margin-top: 3px;" />
+                            <div>
+                                <strong style="color: #ffffff;">No Auth</strong>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
+                                    Fully public - anyone can access without logging in. Use for demos or public apps.
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <small>Choose how users authenticate when accessing your deployed app</small>
+            </div>
+
+            <div class="form-group" id="deployment-target-section" style="display:none;">
+                <label>Deployment Target</label>
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 15px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); margin: 10px 0;">
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <label class="deployment-target-option">
+                            <input type="radio" name="deployment_target" value="public" checked style="margin-top: 3px;" />
+                            <div>
+                                <strong style="color: #ffffff;">Public IP <span id="public-ip-display" style="color: #3b82f6;"></span></strong>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
+                                    Deploy to public IP - accessible from the internet
+                                </div>
+                            </div>
+                        </label>
+                        <label class="deployment-target-option">
+                            <input type="radio" name="deployment_target" value="private" style="margin-top: 3px;" />
+                            <div>
+                                <strong style="color: #ffffff;">Private IP <span id="private-ip-display" style="color: #3b82f6;"></span></strong>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 4px;">
+                                    Deploy to private IP - VPC-internal only (requires VPN/bastion)
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <small>Choose which IP address to use for SSH and deployment</small>
             </div>
         </form>
     </div>
@@ -108,24 +171,24 @@
     <div class="card">
         <h2>⚡ What to Do After Download</h2>
 
-        <div style="background: #e7f3ff; padding: 20px; border-radius: 8px; border-left: 4px solid #0366d6; margin: 20px 0;">
-            <p style="font-size: 1.2em; margin: 0;">
-                <strong>Using Claude Code?</strong> Just tell Claude:<br>
-                <code style="font-size: 1.1em; background: white; padding: 8px 12px; border-radius: 4px; display: inline-block; margin-top: 10px;">
+        <div style="background: rgba(59, 130, 246, 0.15); padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6; margin: 20px 0; border: 1px solid rgba(59, 130, 246, 0.3);">
+            <p style="font-size: 1.2em; margin: 0; color: #d4d4d4;">
+                <strong style="color: #ffffff;">Using Claude Code?</strong> Just tell Claude:<br>
+                <code style="font-size: 1.1em; background: rgba(0, 0, 0, 0.3); padding: 8px 12px; border-radius: 4px; display: inline-block; margin-top: 10px; color: #4ade80; border: 1px solid rgba(255, 255, 255, 0.1);">
                     "Unzip this deployment kit and follow the instructions"
                 </code>
             </p>
         </div>
 
-        <p style="margin-top: 20px;">
-            <strong>Or do it manually:</strong>
+        <p style="margin-top: 20px; color: #d4d4d4;">
+            <strong style="color: #ffffff;">Or do it manually:</strong>
         </p>
-        <ol style="font-size: 1.1em; line-height: 2;">
+        <ol style="font-size: 1.1em; line-height: 2; color: #b0b0b0;">
             <li>Unzip the file: <code>unzip deployment-kit-*.zip</code></li>
             <li>Follow the instructions in <code>DEPLOY_INSTRUCTIONS.md</code></li>
         </ol>
 
-        <p style="margin-top: 20px; color: #586069;">
+        <p style="margin-top: 20px; color: #888;">
             The kit contains: SSH key, deployment instructions, and Claude Code prompt.
         </p>
 
@@ -153,6 +216,25 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load preference from localStorage
     const alwaysUpdate = localStorage.getItem('deployPortal_alwaysUpdate') === 'true';
     alwaysUpdateCheckbox.checked = alwaysUpdate;
+
+    // Fetch instance metadata on page load
+    fetch('/api/instance-metadata')
+        .then(res => res.json())
+        .then(data => {
+            if (data.public_ip) {
+                document.getElementById('public-ip-display').textContent = `(${data.public_ip})`;
+            }
+            if (data.private_ip) {
+                document.getElementById('private-ip-display').textContent = `(${data.private_ip})`;
+            }
+            // Show deployment target section if we have both IPs
+            if (data.public_ip && data.private_ip) {
+                document.getElementById('deployment-target-section').style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching instance metadata:', error);
+        });
 
     // Save preference when changed
     alwaysUpdateCheckbox.addEventListener('change', function() {
@@ -256,6 +338,14 @@ async function downloadKit() {
         deployMode = selectedMode ? selectedMode.value : 'update';
     }
 
+    // Get auth mode
+    const authModeElement = document.querySelector('input[name="auth_mode"]:checked');
+    const authMode = authModeElement ? authModeElement.value : 'cognito';
+
+    // Get deployment target
+    const deploymentTargetElement = document.querySelector('input[name="deployment_target"]:checked');
+    const deploymentTarget = deploymentTargetElement ? deploymentTargetElement.value : 'public';
+
     // Disable button during download
     downloadBtn.disabled = true;
     downloadBtn.textContent = '⏳ Generating kit...';
@@ -266,6 +356,8 @@ async function downloadKit() {
         formData.append('app_name', appName);
         formData.append('app_type', appType);
         formData.append('deploy_mode', deployMode);
+        formData.append('auth_mode', authMode);
+        formData.append('deployment_target', deploymentTarget);
 
         // Submit form
         const response = await fetch('/deploy/download-kit', {
@@ -273,9 +365,26 @@ async function downloadKit() {
             body: formData
         });
 
+        // Check if we got redirected to login (response will be HTML, not ZIP)
+        const contentType = response.headers.get('content-type') || '';
+
+        if (contentType.includes('text/html')) {
+            // We got an HTML page instead of a ZIP file - likely auth redirect
+            throw new Error('Session expired. Please refresh the page and log in again.');
+        }
+
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Download failed');
+            // Try to parse JSON error
+            let errorMessage = 'Download failed';
+            try {
+                if (contentType.includes('application/json')) {
+                    const error = await response.json();
+                    errorMessage = error.error || errorMessage;
+                }
+            } catch (e) {
+                // Parsing failed, use default message
+            }
+            throw new Error(errorMessage);
         }
 
         // Get the blob and trigger download

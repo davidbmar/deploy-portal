@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify, send_file, Response
 from config import Config
+from ec2_utils import EC2Manager
 import boto3
 import os
 import io
@@ -9,12 +10,60 @@ import glob
 import time
 import re
 import json
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Initialize instance metadata on startup
+Config.initialize_instance_metadata()
+
 # Initialize AWS client
 ec2_client = boto3.client('ec2', region_name=Config.get_region())
+ec2_manager = EC2Manager(region=Config.get_region(), ec2_client=ec2_client)
+
+# Resolve security group dynamically at startup
+# Use explicit INSTANCE_IDENTIFIER if set, otherwise use instance IP
+instance_identifier = Config.INSTANCE_IDENTIFIER or Config.get_instance_ip()
+RESOLVED_SECURITY_GROUP = ec2_manager.resolve_security_group_for_instance(
+    instance_identifier=instance_identifier,
+    fallback_sg=Config.SECURITY_GROUP_ID
+)
+
+# Log configuration on startup
+logger.info("=" * 60)
+logger.info("Deploy Portal Configuration:")
+logger.info(f"  Instance Identifier: {instance_identifier}")
+logger.info(f"  Resolved Security Group: {RESOLVED_SECURITY_GROUP}")
+logger.info(f"  Fallback Security Group: {Config.SECURITY_GROUP_ID}")
+logger.info(f"  AWS Region: {Config.get_region()}")
+logger.info("=" * 60)
+
+# Global error handler for JSON routes
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Handle all unhandled exceptions"""
+    # Check if this is a JSON route (starts with /deploy/ and expects JSON response)
+    if request.path.startswith('/deploy/') and (
+        request.method == 'POST' or
+        'application/json' in request.headers.get('Accept', '') or
+        request.path.startswith('/deploy/api/')
+    ):
+        logger.error(f"Unhandled exception on {request.path}: {type(e).__name__} - {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': 'An unexpected error occurred. Please contact administrator.'
+        }), 500
+
+    # For other routes, use Flask's default error handler
+    raise e
 
 # Deployment version (generated at startup)
 DEPLOYMENT_VERSION = datetime.utcnow().strftime(Config.DEPLOYMENT_VERSION_FORMAT)
@@ -55,27 +104,65 @@ def validate_app_name(app_name):
 
     return True, None
 
-def is_ip_whitelisted(ip):
-    """Check if IP is already in security group"""
+def is_ip_whitelisted(ip, security_group_id=None):
+    """
+    Check if IP is already whitelisted in security group
+
+    Args:
+        ip: IP address to check
+        security_group_id: Optional specific security group (uses resolved if None)
+
+    Returns:
+        bool: True if IP is whitelisted for SSH access
+    """
+    sg_id = security_group_id or RESOLVED_SECURITY_GROUP
+
+    if not sg_id:
+        logger.error("No security group ID available for whitelist check")
+        return False
+
     try:
-        response = ec2_client.describe_security_groups(
-            GroupIds=[Config.SECURITY_GROUP_ID]
-        )
+        logger.debug(f"Checking if {ip} is whitelisted in {sg_id}")
+        response = ec2_client.describe_security_groups(GroupIds=[sg_id])
+
         for permission in response['SecurityGroups'][0].get('IpPermissions', []):
             if permission.get('FromPort') == 22 and permission.get('ToPort') == 22:
                 for ip_range in permission.get('IpRanges', []):
                     if ip_range.get('CidrIp') == f"{ip}/32":
+                        logger.info(f"IP {ip} is already whitelisted in {sg_id}")
                         return True
-        return False
-    except Exception as e:
-        print(f"Error checking security group: {e}")
+
+        logger.debug(f"IP {ip} is not whitelisted in {sg_id}")
         return False
 
-def whitelist_ip(ip, email):
-    """Add IP to security group for SSH access"""
+    except Exception as e:
+        logger.error(f"Error checking security group {sg_id}: {e}")
+        return False
+
+def whitelist_ip(ip, email, security_group_id=None):
+    """
+    Add IP to security group for SSH access
+
+    Args:
+        ip: IP address to whitelist
+        email: User email for audit trail
+        security_group_id: Optional specific security group (uses resolved if None)
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    sg_id = security_group_id or RESOLVED_SECURITY_GROUP
+
+    if not sg_id:
+        error_msg = "No security group ID available for whitelisting"
+        logger.error(error_msg)
+        return False, error_msg
+
     try:
+        logger.info(f"Attempting to whitelist IP {ip} for {email} in security group {sg_id}")
+
         ec2_client.authorize_security_group_ingress(
-            GroupId=Config.SECURITY_GROUP_ID,
+            GroupId=sg_id,
             IpPermissions=[{
                 'IpProtocol': 'tcp',
                 'FromPort': 22,
@@ -86,11 +173,35 @@ def whitelist_ip(ip, email):
                 }]
             }]
         )
-        return True, "IP whitelisted successfully"
+
+        logger.info(f"Successfully whitelisted IP {ip} in {sg_id}")
+        return True, f"IP whitelisted successfully in {sg_id}"
+
     except ec2_client.exceptions.ClientError as e:
-        if 'InvalidPermission.Duplicate' in str(e):
-            return True, "IP already whitelisted"
-        return False, str(e)
+        error_code = e.response.get('Error', {}).get('Code', '')
+        error_message = e.response.get('Error', {}).get('Message', str(e))
+
+        if error_code == 'InvalidPermission.Duplicate':
+            logger.info(f"IP {ip} already whitelisted in {sg_id}")
+            return True, "IP is already whitelisted"
+
+        elif error_code == 'InvalidGroup.NotFound':
+            error_msg = f"Security group {sg_id} not found"
+            logger.error(error_msg)
+            return False, error_msg
+
+        elif error_code == 'UnauthorizedOperation':
+            error_msg = f"Insufficient permissions to modify security group {sg_id}"
+            logger.error(error_msg)
+            return False, error_msg
+
+        else:
+            logger.error(f"Error whitelisting IP {ip} in {sg_id}: {error_message}")
+            return False, f"Error: {error_message}"
+
+    except Exception as e:
+        logger.error(f"Unexpected error whitelisting IP {ip}: {e}")
+        return False, f"Unexpected error: {str(e)}"
 
 def load_automation_scripts():
     """Load automation scripts from the automation directory"""
@@ -225,9 +336,22 @@ PORT=8000
 # PORT=5001
 """
 
-def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new', auth_mode='cognito'):
+def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new', auth_mode='cognito', deployment_target='public'):
     """Generate app-specific deployment kit with automation instructions"""
     instance_ip = Config.get_instance_ip()
+
+    # Determine target IP based on deployment_target
+    public_ip = Config.INSTANCE_PUBLIC_IP or instance_ip
+    private_ip = Config.INSTANCE_PRIVATE_IP
+    instance_id = Config.INSTANCE_ID
+
+    # Select the target IP for SSH and deployment
+    if deployment_target == 'private' and private_ip:
+        target_ip = private_ip
+    else:
+        target_ip = public_ip
+        deployment_target = 'public'  # Ensure it's set correctly
+
     # Use deployment version format (lexicographically sortable)
     version = datetime.utcnow().strftime(Config.DEPLOYMENT_VERSION_FORMAT)
     timestamp = version  # For backward compatibility with template
@@ -249,6 +373,14 @@ Your IP: {ip}
 App Name: {app_name}
 App Type: {app_type}
 Kit Version: {version} UTC
+
+## Deployment Target
+
+Instance ID: {instance_id or 'N/A'}
+Deployment Target: **{deployment_target.upper()} IP**
+- Public IP: {public_ip or 'N/A'}
+- Private IP: {private_ip or 'N/A'}
+- Target IP: **{target_ip}** (will be used for SSH and deployment)
 
 ## Quick Start
 
@@ -318,7 +450,7 @@ Done! The skill will:
 
 3. Test SSH connection:
    ```bash
-   ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+   ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
    ```
 
 4. Open Claude Code in your project directory and give it the CLAUDE_PROMPT.md file
@@ -326,11 +458,11 @@ Done! The skill will:
 ## Your App Will Be Deployed To
 
 - Directory: `/home/{Config.EC2_USER}/deployments/{app_name}/`
-- URL: `https://{instance_ip}/{app_name}/` (after nginx setup)
+- URL: `https://{target_ip}/{app_name}/` (after nginx setup)
 
 ## Monitoring
 
-View live activity at: https://{instance_ip}/deploy/activity
+View live activity at: https://{target_ip}/deploy/activity
 
 ## Support
 
@@ -409,7 +541,7 @@ claude-code
 | Context | API URL to Use |
 |---------|----------------|
 | **Local Development** (default) | `http://localhost:8000/api` |
-| **Cloud Deployment** (only during deploy) | `https://{instance_ip}/{app_name}/api` |
+| **Cloud Deployment** (only during deploy) | `https://{target_ip}/{app_name}/api` |
 
 ### Rule 2: Container Names
 | Context | Container Names |
@@ -419,7 +551,7 @@ claude-code
 
 ### Rule 3: Deployment-Specific Changes = SERVER ONLY
 **NEVER modify local source files with:**
-- Cloud URLs (`https://{instance_ip}/...`)
+- Cloud URLs (`https://{target_ip}/...`)
 - Deployment-specific container names (`{app_name}-backend`)
 - Production basePath in next.config.js
 
@@ -556,7 +688,11 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
   SERVER DETAILS
 ────────────────────────────────────────────────────────────────────────────────
 
-  • Host: {instance_ip}
+  • Instance ID: {instance_id or 'N/A'}
+  • Deployment Target: {deployment_target.upper()} IP
+  • Public IP: {public_ip or 'N/A'}
+  • Private IP: {private_ip or 'N/A'}
+  • Target IP (SSH): {target_ip}
   • User: {Config.EC2_USER}
   • SSH Key: capsule-deploy.pem (included in kit)
   • Deployment Path: /home/{Config.EC2_USER}/deployments/{app_name}/
@@ -565,9 +701,9 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
   URLs AFTER DEPLOYMENT
 ────────────────────────────────────────────────────────────────────────────────
 
-  • Public URL: https://{instance_ip}/{app_name}/
-  • API URL: https://{instance_ip}/{app_name}/api/
-  • Monitor: https://{instance_ip}/deploy/activity
+  • Public URL: https://{target_ip}/{app_name}/
+  • API URL: https://{target_ip}/{app_name}/api/
+  • Monitor: https://{target_ip}/deploy/activity
 
 ────────────────────────────────────────────────────────────────────────────────
   WHAT WILL BE DEPLOYED
@@ -590,7 +726,7 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
      • NEXT_PUBLIC_API_URL → public HTTPS URL
 
   2. Environment Variables (ON SERVER ONLY):
-     • NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
+     • NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
      • NEXT_PUBLIC_API_KEY={dashboard_api_key}
      • [Plus any app-specific variables]
 
@@ -651,7 +787,7 @@ chmod 600 capsule-deploy.pem
 
 ```bash
 # From your local machine (in project directory)
-rsync -avz --exclude 'node_modules' --exclude 'venv' --exclude '.git' --exclude '.next' -e "ssh -i capsule-deploy.pem" ./ {Config.EC2_USER}@{instance_ip}:~/deployments/{app_name}/
+rsync -avz --exclude 'node_modules' --exclude 'venv' --exclude '.git' --exclude '.next' -e "ssh -i capsule-deploy.pem" ./ {Config.EC2_USER}@{target_ip}:~/deployments/{app_name}/
 ```
 
 **Notes:**
@@ -666,7 +802,7 @@ rsync -avz --exclude 'node_modules' --exclude 'venv' --exclude '.git' --exclude 
 {'**⏭️ SKIP FOR UPDATES** - Prerequisites already verified.' if is_update else '**Before deploying, ensure the server has required tools:**'}
 
 ```bash
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 
 # Check Docker
 docker --version
@@ -709,7 +845,7 @@ SSH into the server first, then make these changes in the server's copy:
 
 ```bash
 # SSH to server first
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 
 # Navigate to the deployment directory
 cd /home/{Config.EC2_USER}/deployments/{app_name}
@@ -730,7 +866,7 @@ EOF
 
 # 2. Update .env.local for dashboard (ON SERVER)
 cat > dashboard/.env.local << 'EOF'
-NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
+NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
 NEXT_PUBLIC_API_KEY={dashboard_api_key}
 EOF
 
@@ -739,7 +875,7 @@ EOF
 # Change:
 #   - NEXT_PUBLIC_API_URL=http://localhost:8000/api
 # To:
-#   - NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
+#   - NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
 ```
 
 **Why is this needed?**
@@ -766,7 +902,7 @@ If other apps are already running on these ports, Docker will fail to start.
 **Use this automated script to find free ports and update docker-compose.yml:**
 
 ```bash
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 cd /home/{Config.EC2_USER}/deployments/{app_name}
 
 # Automated port conflict detection and allocation
@@ -820,7 +956,7 @@ grep -E '"[0-9]+:(3000|8000|5432)"' docker-compose.yml
 **Step 1: Check all running containers and their ports**
 
 ```bash
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 
 # See ALL containers and what ports they're using
 docker ps --format "table {{{{.Names}}}}\t{{{{.Ports}}}}"
@@ -960,10 +1096,10 @@ curl -s -o /dev/null -w "Backend: HTTP %{{http_code}}\\n" http://localhost:BACKE
 
 ```bash
 # Copy automation scripts to server (if not already there)
-rsync -avz -e "ssh -i capsule-deploy.pem" ./automation/ {Config.EC2_USER}@{instance_ip}:~/deployments/{app_name}/automation/
+rsync -avz -e "ssh -i capsule-deploy.pem" ./automation/ {Config.EC2_USER}@{target_ip}:~/deployments/{app_name}/automation/
 
 # SSH to server
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 
 # Read auth mode from config.json (included in your deployment kit)
 AUTH_MODE=$(python3 -c "import json; print(json.load(open('config.json'))['auth_mode'])")
@@ -971,10 +1107,10 @@ echo "Auth Mode: $AUTH_MODE"
 
 # Run smart deployment with your ports and auth mode
 cd ~/deployments/{app_name}
-bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{instance_ip} FRONTEND_PORT BACKEND_PORT $AUTH_MODE
+bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{target_ip} FRONTEND_PORT BACKEND_PORT $AUTH_MODE
 
 # Example with actual ports:
-# bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{instance_ip} 3000 8000 {auth_mode}
+# bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{target_ip} 3000 8000 {auth_mode}
 ```
 
 **What this does automatically:**
@@ -998,7 +1134,7 @@ bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{
 
 ```bash
 # SSH to server
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 
 # Run the multi-service nginx registration
 # Replace DASHBOARD_PORT and BACKEND_PORT with your actual ports from Step 6!
@@ -1026,7 +1162,7 @@ This script addresses a critical bug where nginx configuration could fail silent
 
 ```bash
 # SSH to server
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 cd ~/deployments/{app_name}
 
 # If you used automated port allocation (Step 6a), read saved ports:
@@ -1211,7 +1347,7 @@ The OAuth2 proxy sits in front of all apps and requires authentication by defaul
 
 ```bash
 # SSH to server
-ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 cd ~/deployments/{app_name}
 
 # Add skip route for no-auth app
@@ -1532,7 +1668,7 @@ sg docker -c 'docker-compose up -d'
 - NEXT_PUBLIC_API_URL=http://localhost:8000/api
 
 # ❌ WRONG - this is for SERVER only:
-- NEXT_PUBLIC_API_URL=https://{instance_ip}/{app_name}/api
+- NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
 ```
 
 #### 2. docker-compose.yml - Remove deployment-specific container names:
@@ -1603,9 +1739,9 @@ grep -n "basePath" dashboard/next.config.js
   ACCESS YOUR APPLICATION
 ────────────────────────────────────────────────────────────────────────────────
 
-  🌐 Public URL:     https://{instance_ip}/{app_name}/
-  🔌 API Endpoint:   https://{instance_ip}/{app_name}/api/
-  📊 Monitor:        https://{instance_ip}/deploy/activity
+  🌐 Public URL:     https://{target_ip}/{app_name}/
+  🔌 API Endpoint:   https://{target_ip}/{app_name}/api/
+  📊 Monitor:        https://{target_ip}/deploy/activity
   🔐 Auth:           OAuth2 (login required)
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -1613,7 +1749,7 @@ grep -n "basePath" dashboard/next.config.js
 ────────────────────────────────────────────────────────────────────────────────
 
   ✅ Next.js basePath: '/{app_name}'
-  ✅ NEXT_PUBLIC_API_URL: https://{instance_ip}/{app_name}/api
+  ✅ NEXT_PUBLIC_API_URL: https://{target_ip}/{app_name}/api
   ✅ Nginx frontend location: /{app_name}/
   ✅ Nginx API location: /{app_name}/api/
 
@@ -1634,7 +1770,7 @@ grep -n "basePath" dashboard/next.config.js
 ────────────────────────────────────────────────────────────────────────────────
 
   # SSH to server
-  ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+  ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 
   # Check status
   cd /home/{Config.EC2_USER}/deployments/{app_name} && docker-compose ps
@@ -1681,7 +1817,11 @@ grep -n "basePath" dashboard/next.config.js
         'deploy_mode': deploy_mode,
         'auth_mode': auth_mode,
         'is_update': is_update,
-        'ec2_host': instance_ip,
+        'ec2_host': target_ip,  # Use target_ip for backward compatibility
+        'ec2_instance_id': instance_id,
+        'ec2_public_ip': public_ip,
+        'ec2_private_ip': private_ip,
+        'deployment_target': deployment_target,
         'ec2_user': Config.EC2_USER,
         'ssh_key_file': 'capsule-deploy.pem',
         'deployment_path': f'/home/{Config.EC2_USER}/deployments/{app_name}',
@@ -1740,7 +1880,7 @@ Download new kit → Move to project → Type `/deploy`
 - **Future**: Use deploy command (`/deploy` - auto-updates from ZIP if needed)
 
 **Kit Version**: {version} UTC
-**App URL**: https://{instance_ip}/{app_name}/
+**App URL**: https://{target_ip}/{app_name}/
 **Generated for**: {email}
 
 ---
@@ -1839,7 +1979,7 @@ Your IP: {ip}
 
 3. Test SSH connection:
    ```bash
-   ssh -i capsule-deploy.pem {Config.EC2_USER}@{instance_ip}
+   ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
    ```
 
 4. Open Claude Code in your project directory and give it the CLAUDE_PROMPT.md file
@@ -2355,6 +2495,24 @@ def check_app_name():
         'deployment_path': deployment_path if app_exists else None
     })
 
+@app.route('/api/instance-metadata', methods=['GET'])
+def get_instance_metadata_api():
+    """Return instance metadata for UI display."""
+    try:
+        return jsonify({
+            'instance_id': Config.INSTANCE_ID,
+            'public_ip': Config.INSTANCE_PUBLIC_IP,
+            'private_ip': Config.INSTANCE_PRIVATE_IP,
+            'security_groups': [
+                {'id': sg['GroupId'], 'name': sg['GroupName']}
+                for sg in Config.INSTANCE_SECURITY_GROUPS
+            ] if Config.INSTANCE_SECURITY_GROUPS else [],
+            'region': Config.get_region()
+        })
+    except Exception as e:
+        logger.error(f"Error getting instance metadata: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/deploy/download-kit', methods=['POST'])
 def download_kit():
     email, ip = get_user_info()
@@ -2364,6 +2522,11 @@ def download_kit():
     app_type = request.form.get('app_type', 'other')
     deploy_mode = request.form.get('deploy_mode', 'new')  # 'new' or 'update'
     auth_mode = request.form.get('auth_mode', 'cognito')  # 'cognito', 'internal', or 'none'
+    deployment_target = request.form.get('deployment_target', 'public')  # 'public' or 'private'
+
+    # Validate deployment target
+    if deployment_target not in ['public', 'private']:
+        deployment_target = 'public'
 
     # Validate app name
     if not app_name:
@@ -2378,7 +2541,7 @@ def download_kit():
         whitelist_ip(ip, email)
 
     # Generate app-specific deployment kit
-    zip_buffer, error = generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode, auth_mode)
+    zip_buffer, error = generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode, auth_mode, deployment_target)
 
     if error:
         return jsonify({'error': error}), 500

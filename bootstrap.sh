@@ -170,9 +170,21 @@ install_systemd_service() {
 install_nginx_configs() {
     log "Installing nginx configurations..."
 
-    # Check if nginx include directories exist
-    if [ ! -d "/etc/nginx/conf.d/system-upstreams" ]; then
-        error "Nginx include directory not found. Run auth gateway bootstrap first."
+    # Create nginx include directories if they don't exist
+    sudo mkdir -p /etc/nginx/conf.d/system-upstreams
+    sudo mkdir -p /etc/nginx/conf.d/routes
+
+    # Remove conflicting configurations
+    # auth-gateway conflicts with deploy-portal (both use port 80 default_server)
+    if [ -L /etc/nginx/sites-enabled/auth-gateway ]; then
+        log "Removing conflicting auth-gateway configuration"
+        sudo rm -f /etc/nginx/sites-enabled/auth-gateway
+    fi
+
+    if [ -f /etc/nginx/sites-available/auth-gateway ]; then
+        log "Disabling auth-gateway to prevent conflicts"
+        sudo mv /etc/nginx/sites-available/auth-gateway \
+                 /etc/nginx/sites-available/auth-gateway.disabled 2>/dev/null || true
     fi
 
     # Copy upstream config
@@ -182,6 +194,14 @@ install_nginx_configs() {
     # Copy routes config
     sudo cp "$SCRIPT_DIR/nginx/routes.conf" \
         /etc/nginx/conf.d/routes/deploy-portal.conf
+
+    # Copy main server config if it doesn't exist
+    if [ ! -f /etc/nginx/conf.d/deploy-portal-server.conf ]; then
+        if [ -f "$SCRIPT_DIR/nginx/server.conf" ]; then
+            sudo cp "$SCRIPT_DIR/nginx/server.conf" \
+                /etc/nginx/conf.d/deploy-portal-server.conf
+        fi
+    fi
 
     log "Nginx configurations installed"
 }

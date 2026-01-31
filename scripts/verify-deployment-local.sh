@@ -67,6 +67,31 @@ else
     test_fail "deploy-portal service is NOT active"
 fi
 
+# Test 1.5: OAuth2 Status (if routes require auth)
+echo ""
+echo "--- Authentication Status ---"
+if systemctl is-active --quiet oauth2-proxy; then
+    test_pass "oauth2-proxy service is active"
+
+    # Check if it's actually responding
+    if curl -f -s http://127.0.0.1:4180/ping > /dev/null 2>&1; then
+        test_pass "oauth2-proxy responding on port 4180"
+    else
+        test_fail "oauth2-proxy not responding on port 4180"
+    fi
+else
+    # Check if routes require auth
+    if grep -q "auth_request" /etc/nginx/conf.d/routes/deploy-portal.conf 2>/dev/null; then
+        test_fail "Routes require OAuth2 but oauth2-proxy is NOT running"
+        echo "   → This will cause 500 errors on all requests"
+        echo "   → Start OAuth2: sudo systemctl start oauth2-proxy"
+        echo "   → Or switch to no-auth: re-run ./bootstrap.sh"
+    else
+        test_warn "OAuth2-proxy not running (using public access routes)"
+        echo "   → Deploy portal is accessible WITHOUT authentication"
+    fi
+fi
+
 # Test 2: Nginx Config
 echo ""
 echo "--- Nginx Configuration ---"

@@ -207,9 +207,38 @@ install_nginx_configs() {
     sudo cp "$SCRIPT_DIR/nginx/upstream.conf" \
         /etc/nginx/conf.d/system-upstreams/deploy-portal.conf
 
-    # Copy routes config
-    sudo cp "$SCRIPT_DIR/nginx/routes.conf" \
-        /etc/nginx/conf.d/routes/deploy-portal.conf
+    # AUTO-DETECT OAUTH2 AND CHOOSE APPROPRIATE ROUTES
+    if systemctl is-active --quiet oauth2-proxy; then
+        # OAuth2 is running - use authenticated routes
+        log "OAuth2-proxy detected - installing authenticated routes"
+
+        if [ -f "$SCRIPT_DIR/nginx/routes-with-auth.conf" ]; then
+            sudo cp "$SCRIPT_DIR/nginx/routes-with-auth.conf" \
+                /etc/nginx/conf.d/routes/deploy-portal.conf
+            log "✓ Authenticated routes installed (OAuth2 enabled)"
+            info "  Deploy portal will require OAuth2 authentication"
+        else
+            error "routes-with-auth.conf not found but OAuth2 is running"
+        fi
+    else
+        # OAuth2 is NOT running - use no-auth routes
+        warn "OAuth2-proxy not running - installing public access routes"
+        warn "⚠ SECURITY WARNING: Deploy portal will be accessible WITHOUT authentication"
+        warn "⚠ Anyone with network access can manage deployments"
+        warn ""
+        warn "To enable OAuth2 authentication:"
+        warn "  1. Start oauth2-proxy service: sudo systemctl start oauth2-proxy"
+        warn "  2. Re-run bootstrap: ./bootstrap.sh"
+        warn ""
+
+        if [ -f "$SCRIPT_DIR/nginx/routes-no-auth.conf" ]; then
+            sudo cp "$SCRIPT_DIR/nginx/routes-no-auth.conf" \
+                /etc/nginx/conf.d/routes/deploy-portal.conf
+            log "✓ Public access routes installed (no authentication)"
+        else
+            error "routes-no-auth.conf not found - cannot proceed without authentication config"
+        fi
+    fi
 
     # Copy main server config (always update to ensure latest version)
     if [ -f "$SCRIPT_DIR/nginx/server.conf" ]; then

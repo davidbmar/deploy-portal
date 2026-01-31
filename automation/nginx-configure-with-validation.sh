@@ -4,6 +4,42 @@
 
 set -e  # Exit on any error
 
+# Function to ensure nginx uses wildcard includes for all apps
+ensure_wildcard_includes() {
+    echo "Ensuring nginx uses wildcard includes for all apps..."
+
+    NGINX_CONFIG="/etc/nginx/conf.d/deploy-portal-server.conf"
+
+    # Check if wildcard include already exists
+    if sudo grep -q "include /etc/nginx/conf.d/routes/\*.conf;" "$NGINX_CONFIG" 2>/dev/null; then
+        echo "✅ Wildcard include already configured"
+        return 0
+    fi
+
+    # Replace explicit include with wildcard if it exists
+    if sudo grep -q "include /etc/nginx/conf.d/routes/deploy-portal.conf;" "$NGINX_CONFIG" 2>/dev/null; then
+        echo "Updating nginx config to use wildcard includes..."
+        sudo sed -i 's|include /etc/nginx/conf.d/routes/deploy-portal.conf;|include /etc/nginx/conf.d/routes/*.conf;|' "$NGINX_CONFIG"
+
+        # Remove any other explicit includes for specific apps (but keep wildcard)
+        sudo sed -i '/include \/etc\/nginx\/conf.d\/routes\/[^*].*\.conf;/d' "$NGINX_CONFIG"
+
+        # Validate and reload
+        if sudo nginx -t 2>&1 | grep -q "test is successful"; then
+            sudo systemctl reload nginx
+            echo "✅ Nginx updated to use wildcard includes"
+        else
+            echo "❌ Nginx config validation failed"
+            return 1
+        fi
+    else
+        echo "⚠️  Note: Nginx config structure may have changed, skipping wildcard update"
+    fi
+}
+
+# Call at the beginning of the script
+ensure_wildcard_includes
+
 APP_NAME="$1"
 FRONTEND_PORT="$2"
 BACKEND_PORT="$3"
@@ -80,7 +116,7 @@ cat > /tmp/${APP_NAME}-location.conf << EOF
         auth_request_set \$user \$upstream_http_x_auth_request_user;
         auth_request_set \$email \$upstream_http_x_auth_request_email;
 
-        # Rewrite to remove /$APP_NAME prefix
+        # Preserve /api prefix when proxying to backend
         rewrite ^/$APP_NAME/api/(.*)\$ /api/\$1 break;
 
         # Proxy to backend API

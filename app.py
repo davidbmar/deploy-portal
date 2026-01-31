@@ -12,6 +12,10 @@ import re
 import json
 import logging
 
+import sys
+sys.path.append("/home/ubuntu/src/deploy-portal")
+from services.framework_detector import FrameworkDetector
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -335,6 +339,62 @@ PORT=8000
 # DATABASE_URL=postgresql://user:pass@postgres:5432/dbname
 # PORT=5001
 """
+
+
+def generate_enhanced_config(app_name, app_type, deploy_mode, auth_mode, email, ip, 
+                            target_ip, public_ip, private_ip, instance_id, 
+                            deployment_target, dashboard_api_key, version, 
+                            project_path=None):
+    """Generate enhanced config.json with framework detection (Issues 3-6 fixes)."""
+    detector = FrameworkDetector()
+    
+    # Initialize defaults
+    frontend_info = {"framework": "unknown", "requires_build_time_env": False, 
+                    "env_var_prefix": "", "version": None}
+    backend_api_prefix = ""
+    frontend_includes_api = False
+    protocol = "http"
+    env_vars = []
+    
+    # If project path provided, detect framework details
+    if project_path and os.path.exists(project_path):
+        frontend_info = detector.detect_frontend_framework(project_path)
+        backend_api_prefix = detector.detect_backend_api_prefix(project_path)
+        frontend_includes_api = detector.analyze_frontend_api_paths(project_path)
+        env_vars = detector.extract_env_vars_from_example(project_path)
+        protocol = detector.detect_ssl_on_server(target_ip, Config.SSH_KEY_PATH)
+    
+    # Build API URLs based on conventions (Issue 4 fix)
+    base_url = f"{protocol}://{target_ip}/{app_name}"
+    api_base_url = base_url if frontend_includes_api else f"{base_url}/api"
+    
+    is_nextjs = frontend_info["framework"] == "nextjs"
+    has_backend = app_type in ['docker', 'multi-service']
+    
+    return {
+        'app_name': app_name, 'app_type': app_type, 'deploy_mode': deploy_mode,
+        'auth_mode': auth_mode, 'is_update': deploy_mode == 'update',
+        'ec2_host': target_ip, 'ec2_instance_id': instance_id,
+        'ec2_public_ip': public_ip, 'ec2_private_ip': private_ip,
+        'deployment_target': deployment_target, 'ec2_user': Config.EC2_USER,
+        'ssh_key_file': 'capsule-deploy.pem',
+        'deployment_path': f'/home/{Config.EC2_USER}/deployments/{app_name}',
+        'protocol': protocol, 'url_path': f'/{app_name}/',
+        'api_base_url': api_base_url, 'api_endpoint_url': f"{base_url}/api",
+        'frontend_framework': frontend_info["framework"],
+        'frontend_requires_build_time_env': frontend_info["requires_build_time_env"],
+        'frontend_env_prefix': frontend_info["env_var_prefix"],
+        'backend_api_prefix': backend_api_prefix,
+        'frontend_includes_api_in_paths': frontend_includes_api,
+        'env_vars': env_vars,
+        'generated_for': email, 'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'source_ip': ip, 'timestamp': version, 'deployment_version': version,
+        'portal_version': DEPLOYMENT_VERSION, 'dashboard_api_key': dashboard_api_key,
+        'app_framework': frontend_info["framework"],
+        'has_separate_backend': has_backend,
+        'requires_nginx_static_block': is_nextjs
+    }
+
 
 def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new', auth_mode='cognito', deployment_target='public'):
     """Generate app-specific deployment kit with automation instructions"""
@@ -1806,38 +1866,15 @@ grep -n "basePath" dashboard/next.config.js
 **For**: {email}
 """
 
-    # Detect app framework and requirements
-    is_nextjs = app_type in ['nextjs', 'node', 'docker'] and 'next' in app_type.lower()
-    has_backend = app_type in ['docker', 'multi-service']
-
-    # Enhanced config.json with app details
-    config_json = json.dumps({
-        'app_name': app_name,
-        'app_type': app_type,
-        'deploy_mode': deploy_mode,
-        'auth_mode': auth_mode,
-        'is_update': is_update,
-        'ec2_host': target_ip,  # Use target_ip for backward compatibility
-        'ec2_instance_id': instance_id,
-        'ec2_public_ip': public_ip,
-        'ec2_private_ip': private_ip,
-        'deployment_target': deployment_target,
-        'ec2_user': Config.EC2_USER,
-        'ssh_key_file': 'capsule-deploy.pem',
-        'deployment_path': f'/home/{Config.EC2_USER}/deployments/{app_name}',
-        'url_path': f'/{app_name}/',
-        'generated_for': email,
-        'generated_at': datetime.utcnow().isoformat() + 'Z',
-        'source_ip': ip,
-        'timestamp': version,  # Use version format
-        'deployment_version': version,
-        'portal_version': DEPLOYMENT_VERSION,
-        'dashboard_api_key': dashboard_api_key,
-        # NEW FIELDS for framework detection
-        'app_framework': f'{app_type}' if app_type else 'unknown',
-        'has_separate_backend': has_backend,
-        'requires_nginx_static_block': is_nextjs  # True for Next.js apps
-    }, indent=2)
+    # Generate enhanced config with framework detection (Issues 3-6 fixes)
+    config_dict = generate_enhanced_config(
+        app_name=app_name, app_type=app_type, deploy_mode=deploy_mode,
+        auth_mode=auth_mode, email=email, ip=ip, target_ip=target_ip,
+        public_ip=public_ip, private_ip=private_ip, instance_id=instance_id,
+        deployment_target=deployment_target, dashboard_api_key=dashboard_api_key,
+        version=version, project_path=None
+    )
+    config_json = json.dumps(config_dict, indent=2)
 
     # Generate QUICKSTART.md
     quickstart = f"""# QUICKSTART - Deploy {app_name}

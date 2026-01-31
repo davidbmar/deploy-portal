@@ -171,7 +171,9 @@ check_nginx_conflicts() {
     log "Checking for nginx configuration conflicts..."
 
     # Check for multiple default_server declarations
-    CONFLICTS=$(grep -r "listen 80 default_server" /etc/nginx/sites-enabled/ 2>/dev/null | wc -l || echo "0")
+    # Use grep -c to count matches, which returns 0 (not an error) when no matches
+    CONFLICTS=$(grep -rc "listen 80 default_server" /etc/nginx/sites-enabled/ 2>/dev/null | grep -v ":0$" | wc -l || true)
+    CONFLICTS=${CONFLICTS:-0}
 
     if [ "$CONFLICTS" -gt 0 ]; then
         warn "Found $CONFLICTS conflicting default_server declarations in sites-enabled/"
@@ -250,7 +252,7 @@ install_nginx_configs() {
     fi
 
     # Verify nginx configuration is valid
-    if ! sudo nginx -t 2>&1 | grep -q "syntax is ok"; then
+    if ! sudo nginx -t > /dev/null 2>&1; then
         error "Nginx configuration test failed. Check syntax errors above."
     fi
 

@@ -881,27 +881,11 @@ sudo usermod -aG docker {Config.EC2_USER}
 
 ### Step 5: Configure Application for Subpath Deployment (ON SERVER ONLY)
 
-{'**⏭️ SKIP FOR UPDATES** - Subpath configuration already done.' if is_update else '**For Next.js Applications with Separate Backend:**'}
+{'**⏭️ SKIP FOR UPDATES** - Subpath configuration already done.' if is_update else '**⚠️ CRITICAL**: Configuration must be done BEFORE building Docker containers!'}
 
-⚠️ **CRITICAL ORDER FOR NEXT.JS APPS**: You MUST configure next.config.js BEFORE building Docker containers!
+#### 5.1 Detect Your Frontend Framework
 
-**Correct sequence (DO NOT SKIP OR REORDER):**
-1. ✅ Rsync files to server (Step 3)
-2. ✅ SSH to server
-3. ✅ **Update next.config.js with basePath** ← MUST BE FIRST
-4. ✅ Update .env.local with cloud URLs
-5. ✅ Update docker-compose.yml
-6. ✅ **THEN** run docker compose build (Step 7) ← MUST BE LAST
-
-**Why this order is critical:**
-- Docker bakes next.config.js into image during build
-- If you build FIRST then change config = build uses OLD config
-- Result: Page loads without CSS (looks like 1990s webpage)
-- Fix requires slow rebuild: `sg docker -c 'docker compose build --no-cache dashboard'`
-
-**⚠️ IMPORTANT: These changes are made ON THE SERVER after rsync, NOT on your local machine!**
-
-SSH into the server first, then make these changes in the server's copy:
+First, identify which framework your application uses. SSH to the server and navigate to the deployment directory:
 
 ```bash
 # SSH to server first
@@ -910,7 +894,42 @@ ssh -i capsule-deploy.pem {Config.EC2_USER}@{target_ip}
 # Navigate to the deployment directory
 cd /home/{Config.EC2_USER}/deployments/{app_name}
 
+# Auto-detect framework
+if [ -f "next.config.js" ] || [ -f "next.config.mjs" ] || [ -f "next.config.ts" ] || [ -f "dashboard/next.config.js" ]; then
+    echo "✅ Detected: Next.js application"
+    FRAMEWORK="nextjs"
+elif [ -f "vite.config.ts" ] || [ -f "vite.config.js" ] || [ -f "vite.config.mjs" ]; then
+    echo "✅ Detected: Vite application (React/Vue/Svelte)"
+    FRAMEWORK="vite"
+elif [ -f "angular.json" ]; then
+    echo "✅ Detected: Angular application"
+    FRAMEWORK="angular"
+elif [ -f "webpack.config.js" ]; then
+    echo "✅ Detected: Webpack application"
+    FRAMEWORK="webpack"
+else
+    echo "⚠️  Could not auto-detect framework. Configure manually based on your build tool."
+    FRAMEWORK="unknown"
+fi
+```
+
+#### 5.2 Configure Based on Framework
+
+**⚠️ CRITICAL ORDER**: Configure → THEN build Docker containers!
+
+**Why this order matters:**
+- Docker bakes config files into images during build
+- If you build FIRST then change config = build uses OLD config
+- **Result**: Blank white page or page without CSS/JavaScript
+- **Fix requires slow rebuild**: `sg docker -c 'docker compose build --no-cache'`
+
+---
+
+**FOR NEXT.JS APPLICATIONS:**
+
+```bash
 # 1. Update next.config.js (ON SERVER) - DO THIS BEFORE DOCKER BUILD!
+# Use the path where next.config.js exists (might be ./next.config.js or ./dashboard/next.config.js)
 cat > dashboard/next.config.js << 'EOF'
 /** @type {{import('next').NextConfig}} */
 const nextConfig = {{
@@ -924,27 +943,150 @@ const nextConfig = {{
 module.exports = nextConfig
 EOF
 
-# 2. Update .env.local for dashboard (ON SERVER)
+# 2. Update .env.local for Next.js (ON SERVER)
 cat > dashboard/.env.local << 'EOF'
 NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
 NEXT_PUBLIC_API_KEY={dashboard_api_key}
 EOF
-
-# 3. Update docker-compose.yml build args (ON SERVER)
-# Edit the SERVER's docker-compose.yml to use cloud URLs:
-# Change:
-#   - NEXT_PUBLIC_API_URL=http://localhost:8000/api
-# To:
-#   - NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
 ```
 
-**Why is this needed?**
-- `basePath` tells Next.js the app is served from `/{app_name}/` not `/`
-- `assetPrefix` ensures static assets load from correct path
-- `trailingSlash: true` ensures URLs work with trailing slashes (nginx standard)
-- `NEXT_PUBLIC_API_URL` must use the public HTTPS URL, not localhost
+**Why this works:**
+- `basePath: '/{app_name}'` tells Next.js the app is served from `/{app_name}/` not `/`
+- `assetPrefix` ensures static assets (JS/CSS) load from correct path
+- `trailingSlash: true` ensures URLs work with nginx trailing slash redirects
 
-**⚠️ DO NOT modify your local docker-compose.yml with cloud URLs! Keep it using localhost.**
+---
+
+**FOR VITE APPLICATIONS (React/Vue/Svelte):**
+
+```bash
+# 1. Backup existing config
+cp vite.config.ts vite.config.ts.backup
+
+# 2. Add base path to vite.config.ts (ON SERVER) - DO THIS BEFORE DOCKER BUILD!
+# Method: Insert base property right after defineConfig({{
+sed -i '/export default defineConfig({{/a\\  base: "/{app_name}/",' vite.config.ts
+
+# 3. Verify the change
+echo "Updated vite.config.ts:"
+head -10 vite.config.ts
+
+# If sed didn't work, manually edit vite.config.ts:
+# nano vite.config.ts
+# Add this line right after "export default defineConfig({{":
+#   base: "/{app_name}/",
+```
+
+**Example Vite config after modification:**
+```typescript
+export default defineConfig({{
+  base: "/{app_name}/",  // ADD THIS LINE
+  plugins: [react()],
+  // ... rest of config
+}});
+```
+
+**Why this works:**
+- `base: "/{app_name}/"` tells Vite to generate asset paths like `/{app_name}/assets/main.js`
+- Without this, Vite generates `/assets/main.js` which results in 404 errors
+- Note: Vite requires trailing slash in base path
+
+**Symptoms without base config:**
+- ✗ Blank white page
+- ✗ Browser console shows 404 errors for JS/CSS files
+- ✗ HTML loads but no styling or JavaScript executes
+
+---
+
+**FOR ANGULAR APPLICATIONS:**
+
+```bash
+# Update angular.json build configuration
+# Add baseHref and deployUrl to build options
+
+# Manual edit required:
+nano angular.json
+
+# Add these properties to projects.[your-project].architect.build.options:
+# "baseHref": "/{app_name}/",
+# "deployUrl": "/{app_name}/"
+```
+
+---
+
+**FOR WEBPACK/CUSTOM BUILDS:**
+
+```bash
+# Update webpack.config.js
+# Set publicPath in output configuration
+
+# Manual edit required:
+nano webpack.config.js
+
+# Add or update:
+# output: {{
+#   publicPath: '/{app_name}/'
+# }}
+```
+
+---
+
+**FOR CREATE REACT APP (CRA):**
+
+```bash
+# CRA uses PUBLIC_URL environment variable
+# Add to .env file:
+echo "PUBLIC_URL=/{app_name}" > .env.production
+```
+
+---
+
+#### 5.3 Framework Configuration Reference
+
+| Framework | Config File | Property Name | Example Value | Trailing Slash? |
+|-----------|-------------|---------------|---------------|-----------------|
+| Next.js | `next.config.js` | `basePath` + `assetPrefix` | `'/{app_name}'` | No |
+| Vite | `vite.config.ts` | `base` | `'/{app_name}/'` | Yes |
+| Angular | `angular.json` | `baseHref` + `deployUrl` | `'/{app_name}/'` | Yes |
+| Webpack | `webpack.config.js` | `output.publicPath` | `'/{app_name}/'` | Yes |
+| CRA | `.env.production` | `PUBLIC_URL` | `'/{app_name}'` | No |
+
+#### 5.4 Update Environment Variables (All Frameworks)
+
+After configuring the framework-specific settings, update environment variables:
+
+```bash
+# Update .env files to use cloud URLs (ON SERVER)
+# Location depends on your project structure
+
+# Common patterns:
+cat > .env.local << 'EOF'
+VITE_API_URL=https://{target_ip}/{app_name}/api
+REACT_APP_API_URL=https://{target_ip}/{app_name}/api
+NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
+EOF
+
+# OR if using docker-compose.yml environment section:
+# Edit docker-compose.yml and change localhost URLs to cloud URLs
+# Change: http://localhost:8000/api
+# To: https://{target_ip}/{app_name}/api
+```
+
+#### 5.5 Verify Configuration Before Building
+
+```bash
+# For Vite apps, verify base is set
+grep -n "base:" vite.config.ts
+
+# For Next.js apps, verify basePath
+grep -n "basePath:" next.config.js || grep -n "basePath:" dashboard/next.config.js
+
+# If not found, STOP and configure before proceeding!
+```
+
+**⚠️ IMPORTANT**: All these changes are made **ON THE SERVER** after rsync, **NOT on your local machine!**
+
+**⚠️ DO NOT** modify your local files with cloud URLs! Keep local development configs using localhost.
 
 ### Step 6: Check for Port Conflicts (MANDATORY - DO THIS FIRST!)
 

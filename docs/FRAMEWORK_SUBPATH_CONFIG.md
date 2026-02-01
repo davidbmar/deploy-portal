@@ -184,6 +184,258 @@ PUBLIC_URL=/your-app-name npm run build
 
 ---
 
+## Client-Side Router Configuration
+
+### Why Router Configuration is Required
+
+Client-side routers handle in-app navigation independently from the build tool:
+
+| Component | Handles | Example |
+|-----------|---------|---------|
+| **Vite/Webpack** | Asset paths | `/app-name/assets/main.js` |
+| **Router** | Navigation | Clicking links, browser back/forward |
+
+**Both need base path configuration** for subpath deployments to work!
+
+### Symptoms of Missing Router Config
+
+Even if your build tool is correctly configured:
+
+- ✅ Assets load correctly (200 OK)
+- ✅ HTML/CSS/JS all work
+- ❌ BUT app shows 404 or "page not found" errors
+- ❌ OR shows "Did you forget to add the page to the router?"
+
+### Common Routers
+
+#### React Router (react-router-dom)
+
+**Configuration property**: `basename` on `<BrowserRouter>`
+
+```tsx
+import { BrowserRouter } from 'react-router-dom'
+
+function App() {
+  return (
+    <BrowserRouter basename="/app-name">
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/about" element={<About />} />
+      </Routes>
+    </BrowserRouter>
+  )
+}
+```
+
+**Detection:**
+```bash
+grep -r "BrowserRouter" src/ --include="*.tsx" --include="*.jsx"
+```
+
+**Documentation**: [React Router basename](https://reactrouter.com/en/main/router-components/browser-router#basename)
+
+---
+
+#### Wouter
+
+**Configuration property**: `base` on `<Router>` component
+
+```tsx
+import { Router, Switch, Route } from "wouter";
+
+function App() {
+  return (
+    <Router base="/app-name">
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/about" component={About} />
+      </Switch>
+    </Router>
+  );
+}
+```
+
+**Detection:**
+```bash
+grep -r 'from "wouter"' src/ --include="*.tsx" --include="*.jsx"
+```
+
+**Documentation**: [Wouter base path](https://github.com/molefrog/wouter#are-relative-routes-and-links-supported)
+
+**Common mistake:**
+```tsx
+// ❌ Wrong: No Router wrapper
+<Switch>
+  <Route path="/" component={Home} />
+</Switch>
+
+// ✅ Correct: Wrapped in Router with base
+<Router base="/app-name">
+  <Switch>
+    <Route path="/" component={Home} />
+  </Switch>
+</Router>
+```
+
+---
+
+#### TanStack Router
+
+**Configuration property**: `basepath` in router config
+
+```tsx
+import { createRouter } from '@tanstack/react-router'
+
+const router = createRouter({
+  routeTree,
+  basepath: '/app-name',
+})
+```
+
+**Detection:**
+```bash
+find src -name "*router*.tsx" -o -name "*router*.ts"
+```
+
+---
+
+#### Vue Router
+
+**Configuration property**: First parameter to `createWebHistory()`
+
+```typescript
+import { createRouter, createWebHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createWebHistory('/app-name'),
+  routes: [
+    { path: '/', component: Home },
+    { path: '/about', component: About },
+  ]
+})
+```
+
+**Detection:**
+```bash
+grep -r "createWebHistory" src/
+```
+
+**Common mistake:**
+```typescript
+// ❌ Wrong: No base path
+history: createWebHistory()
+
+// ✅ Correct: Base path specified
+history: createWebHistory('/app-name')
+```
+
+---
+
+### Router Detection Script
+
+Save this as `detect-router.sh`:
+
+```bash
+#!/bin/bash
+# Detect and display router type
+
+PACKAGE_JSON="package.json"
+
+if [ -f "$PACKAGE_JSON" ]; then
+    if grep -q '"react-router-dom"' "$PACKAGE_JSON"; then
+        echo "Router: React Router (react-router-dom)"
+        echo "Config needed: <BrowserRouter basename='/app-name'>"
+    elif grep -q '"wouter"' "$PACKAGE_JSON"; then
+        echo "Router: Wouter"
+        echo "Config needed: <Router base='/app-name'>"
+    elif grep -q '"@tanstack/react-router"' "$PACKAGE_JSON"; then
+        echo "Router: TanStack Router"
+        echo "Config needed: basepath: '/app-name' in router config"
+    elif grep -q '"vue-router"' "$PACKAGE_JSON"; then
+        echo "Router: Vue Router"
+        echo "Config needed: createWebHistory('/app-name')"
+    else
+        echo "Router: None detected or unsupported"
+    fi
+else
+    echo "No package.json found"
+fi
+```
+
+### Troubleshooting Router Issues
+
+#### Symptom: Assets load but app shows 404/not found
+
+**Diagnosis:**
+```bash
+# 1. Check browser DevTools console - no JS/CSS errors?
+# 2. Check Network tab - assets return 200?
+# 3. If YES to both → Router basename is missing!
+```
+
+**Fix:**
+1. Detect router type: `bash detect-router.sh`
+2. Add basename/base to router configuration (see examples above)
+3. Rebuild Docker container: `docker-compose build --no-cache`
+4. Restart: `docker-compose up -d`
+
+#### Symptom: "Did you forget to add the page to the router?"
+
+This error appears when:
+- Build tool base path is configured ✅
+- Assets load correctly ✅
+- BUT router doesn't know about the subpath ❌
+
+**Example with Wouter:**
+```
+Browser URL: /app-name/
+Wouter sees: /app-name/ (full path)
+Wouter tries to match: path="/" → NO MATCH
+Falls through to: NotFound component
+```
+
+**Solution:** Add `<Router base="/app-name">` wrapper (see Wouter example above)
+
+### Real-World Example: Wouter Router Fix
+
+**Problem:** App deployed to `/automated-speech-recognition/` showed error "Did you forget to add the page to the router?" even though assets loaded correctly.
+
+**Root cause:** Vite base path was configured, but Wouter router wasn't.
+
+**Before (broken):**
+```tsx
+import { Switch, Route } from "wouter";
+
+function App() {
+  return (
+    <Switch>
+      <Route path="/" component={Dashboard} />
+      <Route component={NotFound} />  // ← Shows error
+    </Switch>
+  );
+}
+```
+
+**After (fixed):**
+```tsx
+import { Router, Switch, Route } from "wouter";
+
+function App() {
+  return (
+    <Router base="/automated-speech-recognition">
+      <Switch>
+        <Route path="/" component={Dashboard} />
+        <Route component={NotFound} />
+      </Switch>
+    </Router>
+  );
+}
+```
+
+**Result:** App now displays Dashboard correctly at `/automated-speech-recognition/`
+
+---
+
 ## Critical Timing: Configure THEN Build
 
 **⚠️ MUST configure BEFORE building Docker containers!**

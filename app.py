@@ -1088,6 +1088,213 @@ grep -n "basePath:" next.config.js || grep -n "basePath:" dashboard/next.config.
 
 **⚠️ DO NOT** modify your local files with cloud URLs! Keep local development configs using localhost.
 
+---
+
+#### 5.6 Configure Client-Side Router (Critical for SPAs)
+
+⚠️ **IMPORTANT**: After configuring the build tool (Vite/Next.js/etc.), you MUST also configure your client-side router to match the base path!
+
+**Why this is needed:**
+- Build tools (Vite/Webpack) handle asset paths (JS/CSS files)
+- Routers handle in-app navigation (clicking links, browser back/forward)
+- BOTH need to know the base path for subpath deployments
+
+**Symptoms of missing router config:**
+- ✅ Assets load correctly (200 OK)
+- ✅ HTML/CSS/JS all work
+- ❌ BUT app shows 404 or "page not found" errors
+- ❌ OR shows "Did you forget to add the page to the router?"
+
+---
+
+**Step 1: Detect your router library**
+
+```bash
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# Check package.json for router dependencies
+if grep -q '"react-router-dom"' package.json 2>/dev/null; then
+    echo "✅ Detected: React Router"
+    ROUTER="react-router"
+elif grep -q '"wouter"' package.json 2>/dev/null; then
+    echo "✅ Detected: Wouter"
+    ROUTER="wouter"
+elif grep -q '"@tanstack/react-router"' package.json 2>/dev/null; then
+    echo "✅ Detected: TanStack Router"
+    ROUTER="tanstack"
+elif grep -q '"@reach/router"' package.json 2>/dev/null; then
+    echo "✅ Detected: Reach Router"
+    ROUTER="reach"
+elif grep -q '"vue-router"' package.json 2>/dev/null; then
+    echo "✅ Detected: Vue Router"
+    ROUTER="vue"
+else
+    echo "⚠️  No router detected or unsupported router"
+    echo "   Check package.json and configure manually"
+    ROUTER="unknown"
+fi
+```
+
+---
+
+**Step 2: Configure router based on type**
+
+**FOR REACT ROUTER (react-router-dom):**
+
+Find your router setup file (usually `src/main.tsx`, `src/App.tsx`, or `src/router.tsx`):
+
+```bash
+# Search for BrowserRouter usage
+grep -r "BrowserRouter" client/src/ --include="*.tsx" --include="*.jsx" 2>/dev/null || \\
+grep -r "BrowserRouter" src/ --include="*.tsx" --include="*.jsx" 2>/dev/null
+```
+
+Update to add `basename` prop:
+
+```tsx
+// BEFORE (broken)
+import {{ BrowserRouter }} from 'react-router-dom'
+
+function App() {{
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={{<Home />}} />
+        <Route path="/about" element={{<About />}} />
+      </Routes>
+    </BrowserRouter>
+  )
+}}
+
+// AFTER (fixed)
+import {{ BrowserRouter }} from 'react-router-dom'
+
+function App() {{
+  return (
+    <BrowserRouter basename="/{app_name}">  {{/* Add basename */}}
+      <Routes>
+        <Route path="/" element={{<Home />}} />
+        <Route path="/about" element={{<About />}} />
+      </Routes>
+    </BrowserRouter>
+  )
+}}
+```
+
+**Documentation**: [React Router basename](https://reactrouter.com/en/main/router-components/browser-router#basename)
+
+---
+
+**FOR WOUTER:**
+
+Find your router setup (usually `src/App.tsx`):
+
+```bash
+# Search for wouter Switch usage
+grep -r 'from "wouter"' client/src/ --include="*.tsx" --include="*.jsx" 2>/dev/null || \\
+grep -r 'from "wouter"' src/ --include="*.tsx" --include="*.jsx" 2>/dev/null
+```
+
+Update to wrap routes in `<Router base="...">`:
+
+```tsx
+// BEFORE (broken)
+import {{ Switch, Route }} from "wouter";
+
+function App() {{
+  return (
+    <Switch>
+      <Route path="/" component={{Home}} />
+      <Route path="/about" component={{About}} />
+    </Switch>
+  );
+}}
+
+// AFTER (fixed)
+import {{ Router, Switch, Route }} from "wouter";  // Add Router import
+
+function App() {{
+  return (
+    <Router base="/{app_name}">  {{/* Add Router with base */}}
+      <Switch>
+        <Route path="/" component={{Home}} />
+        <Route path="/about" component={{About}} />
+      </Switch>
+    </Router>
+  );
+}}
+```
+
+**Documentation**: [Wouter base path](https://github.com/molefrog/wouter#are-relative-routes-and-links-supported)
+
+---
+
+**FOR TANSTACK ROUTER:**
+
+Update router configuration file (usually `src/router.tsx` or `src/routeTree.gen.ts`):
+
+```tsx
+// Add basepath to router config
+const router = createRouter({{
+  routeTree,
+  basepath: '/{app_name}',  // Add this line
+}})
+```
+
+---
+
+**FOR VUE ROUTER:**
+
+Update router configuration (usually `src/router/index.ts` or `src/router.ts`):
+
+```typescript
+// BEFORE
+const router = createRouter({{
+  history: createWebHistory(),
+  routes: [...]
+}})
+
+// AFTER
+const router = createRouter({{
+  history: createWebHistory('/{app_name}'),  // Add base path
+  routes: [...]
+}})
+```
+
+---
+
+**Step 3: Verify router configuration**
+
+```bash
+# For React Router - check for basename
+grep -r "basename=" client/src/ --include="*.tsx" --include="*.jsx" 2>/dev/null || \\
+grep -r "basename=" src/ --include="*.tsx" --include="*.jsx" 2>/dev/null
+
+# For Wouter - check for Router base
+grep -r "<Router base=" client/src/ --include="*.tsx" --include="*.jsx" 2>/dev/null || \\
+grep -r "<Router base=" src/ --include="*.tsx" --include="*.jsx" 2>/dev/null
+
+# For Vue - check createWebHistory
+grep -r "createWebHistory" src/ 2>/dev/null
+
+# If NOT found, STOP and configure before rebuilding!
+```
+
+---
+
+#### 5.7 Configuration Checklist
+
+Before running `docker-compose build`, verify:
+
+- [ ] Vite/Next.js/Angular base path configured ✅
+- [ ] Router basename/base configured ✅
+- [ ] Environment variables updated ✅
+- [ ] docker-compose.yml ports allocated ✅
+
+**Only proceed to Step 7 (Docker Build) after ALL configs are complete!**
+
+---
+
 ### Step 6: Check for Port Conflicts (MANDATORY - DO THIS FIRST!)
 
 {'**For UPDATES:** Check if your existing containers are still running, restart if needed.' if is_update else '**⚠️ CRITICAL: You MUST check for port conflicts BEFORE deploying!**'}

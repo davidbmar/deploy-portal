@@ -1,0 +1,30 @@
+{
+  "name": "subpath-scanner",
+  "version": "0.1.0",
+  "description": "AST-based scanner for detecting absolute path issues in SPAs deployed to subpaths",
+  "main": "dist/cli.js",
+  "bin": {
+    "subpath-scanner": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "scan": "node dist/cli.js scan"
+  },
+  "keywords": ["subpath", "deployment", "scanner", "spa", "ast"],
+  "author": "Deploy Portal",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/types": "^7.23.0",
+    "commander": "^11.1.0",
+    "chalk": "^4.1.2",
+    "glob": "^10.3.0"
+  },
+  "devDependencies": {
+    "@types/babel__traverse": "^7.20.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

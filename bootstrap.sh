@@ -276,6 +276,21 @@ fix_static_permissions() {
     fi
 }
 
+setup_ssl() {
+    log "Setting up SSL certificates..."
+
+    if [ -f "$SCRIPT_DIR/scripts/setup-ssl.sh" ]; then
+        bash "$SCRIPT_DIR/scripts/setup-ssl.sh"
+        log "SSL setup complete"
+    else
+        warn "SSL setup script not found at $SCRIPT_DIR/scripts/setup-ssl.sh"
+        warn "SSL will not be configured automatically"
+    fi
+
+    # Note: SSL nginx configuration is already included in nginx/server.conf template
+    # which was installed by install_nginx_configs()
+}
+
 start_service() {
     log "Starting deploy-portal service..."
 
@@ -339,6 +354,7 @@ main() {
     initialize_data_files
     install_systemd_service
     install_nginx_configs
+    setup_ssl
     fix_static_permissions
     start_service
     verify_installation

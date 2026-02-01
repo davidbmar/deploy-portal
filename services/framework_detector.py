@@ -225,26 +225,49 @@ class FrameworkDetector:
     def detect_ssl_on_server(self, target_ip: str, ssh_key_path: str) -> str:
         """
         Detect if SSL is configured on the target server.
-        
+
+        Checks for:
+        - Let's Encrypt certificates (/etc/letsencrypt/live/)
+        - Self-signed certificates (/etc/nginx/ssl/)
+        - Port 443 listening
+
         Returns:
-            "https" if SSL certificates found, "http" otherwise
+            "https" if SSL certificates found AND port 443 listening
+            "http" otherwise
         """
         import subprocess
-        
+
         try:
-            result = subprocess.run(
-                ["ssh", "-i", ssh_key_path, "-o", "StrictHostKeyChecking=no", 
+            # Check for certificates (Let's Encrypt or self-signed)
+            cert_check = subprocess.run(
+                ["ssh", "-i", ssh_key_path, "-o", "StrictHostKeyChecking=no",
                  "-o", "ConnectTimeout=10", f"ubuntu@{target_ip}",
-                 "[ -d /etc/letsencrypt/live ] && ls /etc/letsencrypt/live/ 2>/dev/null | head -1 || echo ''"],
+                 "([ -d /etc/letsencrypt/live ] && ls /etc/letsencrypt/live/ 2>/dev/null | head -1) || "
+                 "([ -f /etc/nginx/ssl/selfsigned.crt ] && echo 'selfsigned') || echo ''"],
                 capture_output=True,
                 text=True,
                 timeout=15
             )
-            
-            # If we found any certificate directory, SSL is configured
-            if result.stdout.strip():
+
+            # Check if port 443 is listening
+            port_check = subprocess.run(
+                ["ssh", "-i", ssh_key_path, "-o", "StrictHostKeyChecking=no",
+                 "-o", "ConnectTimeout=10", f"ubuntu@{target_ip}",
+                 "sudo netstat -tlnp | grep ':443' >/dev/null && echo 'listening' || echo ''"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+
+            # SSL is available if we have certs AND port 443 is listening
+            has_cert = bool(cert_check.stdout.strip())
+            port_listening = 'listening' in port_check.stdout
+
+            if has_cert and port_listening:
                 return "https"
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, Exception) as e:
-            print(f"Could not detect SSL configuration: {e}")
-            
-        return "http"  # Default to HTTP if can't detect
+            else:
+                return "http"
+
+        except Exception as e:
+            # Default to HTTP if detection fails
+            return "http"

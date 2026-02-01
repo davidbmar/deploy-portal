@@ -13,6 +13,41 @@ A self-service web portal for provisioning SSH access and deploying applications
 - **🎨 Modern Web UI**: Clean, responsive interface for all features
 - **📚 Built-in Documentation**: Architecture diagrams and deployment guides
 
+## 🔒 SSL/HTTPS Support
+
+The deployment portal supports both HTTP (port 80) and HTTPS (port 443) for secure access.
+
+**Current Configuration:**
+- ✅ Self-signed SSL certificates (10-year validity)
+- ✅ Port 443 configured and listening
+- ✅ Automatic SSL detection for deployed applications
+- ✅ Modern TLS 1.2/1.3 with secure cipher suites
+- ✅ Security headers (HSTS, X-Frame-Options, X-Content-Type-Options)
+
+**Accessing the Portal:**
+- HTTPS: `https://3.87.27.213/` (secure, self-signed certificate)
+- HTTP: `http://3.87.27.213/` (fallback, unencrypted)
+
+**Deployed Applications:**
+Applications deployed through the portal automatically detect SSL availability and use HTTPS URLs when configured.
+
+**SSL Certificate Information:**
+- Type: Self-signed certificate
+- Validity: 10 years (expires 2036-01-30)
+- Location: `/etc/nginx/ssl/selfsigned.crt` and `/etc/nginx/ssl/selfsigned.key`
+- Automated generation via `scripts/setup-ssl.sh`
+
+**For Production:**
+Consider migrating to Let's Encrypt for trusted certificates:
+```bash
+sudo certbot --nginx -d yourdomain.com
+```
+
+**VPC Deployment:**
+Self-signed certificates are acceptable for internal VPC deployments with VPN access.
+
+See [docs/SSL_SETUP.md](docs/SSL_SETUP.md) for detailed SSL configuration and troubleshooting.
+
 ## 🏗️ Architecture
 
 ```

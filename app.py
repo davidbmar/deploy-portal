@@ -518,11 +518,11 @@ Done! The skill will:
 ## Your App Will Be Deployed To
 
 - Directory: `/home/{Config.EC2_USER}/deployments/{app_name}/`
-- URL: `https://{target_ip}/{app_name}/` (after nginx setup)
+- URL: `{config["protocol"]}://{target_ip}/{app_name}/` (after nginx setup)
 
 ## Monitoring
 
-View live activity at: https://{target_ip}/deploy/activity
+View live activity at: {config["protocol"]}://{target_ip}/deploy/activity
 
 ## Support
 
@@ -601,7 +601,7 @@ claude-code
 | Context | API URL to Use |
 |---------|----------------|
 | **Local Development** (default) | `http://localhost:8000/api` |
-| **Cloud Deployment** (only during deploy) | `https://{target_ip}/{app_name}/api` |
+| **Cloud Deployment** (only during deploy) | `{config["protocol"]}://{target_ip}/{app_name}/api` |
 
 ### Rule 2: Container Names
 | Context | Container Names |
@@ -611,7 +611,7 @@ claude-code
 
 ### Rule 3: Deployment-Specific Changes = SERVER ONLY
 **NEVER modify local source files with:**
-- Cloud URLs (`https://{target_ip}/...`)
+- Cloud URLs (`{config["protocol"]}://{target_ip}/...`)
 - Deployment-specific container names (`{app_name}-backend`)
 - Production basePath in next.config.js
 
@@ -761,9 +761,9 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
   URLs AFTER DEPLOYMENT
 ────────────────────────────────────────────────────────────────────────────────
 
-  • Public URL: https://{target_ip}/{app_name}/
-  • API URL: https://{target_ip}/{app_name}/api/
-  • Monitor: https://{target_ip}/deploy/activity
+  • Public URL: {config["protocol"]}://{target_ip}/{app_name}/
+  • API URL: {config["protocol"]}://{target_ip}/{app_name}/api/
+  • Monitor: {config["protocol"]}://{target_ip}/deploy/activity
 
 ────────────────────────────────────────────────────────────────────────────────
   WHAT WILL BE DEPLOYED
@@ -786,7 +786,7 @@ If you prefer manual deployment or need to troubleshoot, continue with Step 1 be
      • NEXT_PUBLIC_API_URL → public HTTPS URL
 
   2. Environment Variables (ON SERVER ONLY):
-     • NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
+     • NEXT_PUBLIC_API_URL={config["protocol"]}://{target_ip}/{app_name}/api
      • NEXT_PUBLIC_API_KEY={dashboard_api_key}
      • [Plus any app-specific variables]
 
@@ -945,7 +945,7 @@ EOF
 
 # 2. Update .env.local for Next.js (ON SERVER)
 cat > dashboard/.env.local << 'EOF'
-NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
+NEXT_PUBLIC_API_URL={config["protocol"]}://{target_ip}/{app_name}/api
 NEXT_PUBLIC_API_KEY={dashboard_api_key}
 EOF
 ```
@@ -1061,15 +1061,15 @@ After configuring the framework-specific settings, update environment variables:
 
 # Common patterns:
 cat > .env.local << 'EOF'
-VITE_API_URL=https://{target_ip}/{app_name}/api
-REACT_APP_API_URL=https://{target_ip}/{app_name}/api
-NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
+VITE_API_URL={config["protocol"]}://{target_ip}/{app_name}/api
+REACT_APP_API_URL={config["protocol"]}://{target_ip}/{app_name}/api
+NEXT_PUBLIC_API_URL={config["protocol"]}://{target_ip}/{app_name}/api
 EOF
 
 # OR if using docker-compose.yml environment section:
 # Edit docker-compose.yml and change localhost URLs to cloud URLs
 # Change: http://localhost:8000/api
-# To: https://{target_ip}/{app_name}/api
+# To: {config["protocol"]}://{target_ip}/{app_name}/api
 ```
 
 #### 5.5 Verify Configuration Before Building
@@ -1421,6 +1421,91 @@ My allocated ports for {app_name}:
 - Postgres: ______ (default 5432)
 ```
 
+
+## ⚠️ Step 6.5: Configure Docker Build Args (CRITICAL for Frontend Frameworks)
+
+**Frontend frameworks (Next.js, Vite, CRA) require environment variables at BUILD TIME.**
+
+### Understanding Build-Time vs Runtime Variables
+
+| Framework | Prefix | When Applied | Where to Pass |
+|-----------|--------|--------------|----------------|
+| Next.js | \`NEXT_PUBLIC_*\` | Build time | docker-compose build args |
+| Vite | \`VITE_*\` | Build time | docker-compose build args |
+| CRA | \`REACT_APP_*\` | Build time | docker-compose build args |
+
+**❌ WRONG**: Passing \`NEXT_PUBLIC_API_URL\` in environment section (too late, build already happened)
+**✅ CORRECT**: Passing \`NEXT_PUBLIC_API_URL\` in build args section
+
+### Check if docker-compose.yml Has Build Args
+
+\`\`\`bash
+cd /home/{Config.EC2_USER}/deployments/{app_name}
+
+# Check if frontend service has build args
+if grep -q "args:" docker-compose.yml; then
+    echo "✓ Build args section found"
+else
+    echo "⚠️ No build args section - need to add it"
+fi
+\`\`\`
+
+### Add Build Args to docker-compose.yml
+
+**Edit docker-compose.yml and ensure frontend service has:**
+
+\`\`\`yaml
+services:
+  frontend:  # or dashboard, or whatever your frontend service is called
+    build:
+      context: ./frontend  # or ./dashboard
+      dockerfile: Dockerfile
+      args:
+        # ✅ Pass environment variables as build args
+        NEXT_PUBLIC_API_URL: {config["protocol"]}://{target_ip}/{app_name}/api
+        NEXT_PUBLIC_API_KEY: {dashboard_api_key}
+        # Add any other NEXT_PUBLIC_* / VITE_* / REACT_APP_* variables here
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+\`\`\`
+
+**For Vite:**
+\`\`\`yaml
+      args:
+        VITE_API_URL: {config["protocol"]}://{target_ip}/{app_name}/api
+\`\`\`
+
+**For Create React App:**
+\`\`\`yaml
+      args:
+        REACT_APP_API_URL: {config["protocol"]}://{target_ip}/{app_name}/api
+\`\`\`
+
+### Verify Build Args
+
+\`\`\`bash
+# Show the frontend service configuration
+echo "Frontend service configuration:"
+sed -n '/^  frontend:/,/^  [a-z]/p' docker-compose.yml | head -20
+
+# OR for dashboard:
+sed -n '/^  dashboard:/,/^  [a-z]/p' docker-compose.yml | head -20
+\`\`\`
+
+**Expected output should include:**
+\`\`\`
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: {config["protocol"]}://{target_ip}/{app_name}/api
+\`\`\`
+
+---
+
 ### Step 7: Deploy with Docker Compose
 
 **For applications with docker-compose.yml:**
@@ -1516,10 +1601,10 @@ echo "Auth Mode: $AUTH_MODE"
 
 # Run smart deployment with your ports and auth mode
 cd ~/deployments/{app_name}
-bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{target_ip} FRONTEND_PORT BACKEND_PORT $AUTH_MODE
+bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} {config["protocol"]}://{target_ip} FRONTEND_PORT BACKEND_PORT $AUTH_MODE
 
 # Example with actual ports:
-# bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} https://{target_ip} 3000 8000 {auth_mode}
+# bash automation/smart-deploy.sh {app_name} /home/{Config.EC2_USER}/deployments/{app_name} {config["protocol"]}://{target_ip} 3000 8000 {auth_mode}
 ```
 
 **What this does automatically:**
@@ -2077,7 +2162,7 @@ sg docker -c 'docker-compose up -d'
 - NEXT_PUBLIC_API_URL=http://localhost:8000/api
 
 # ❌ WRONG - this is for SERVER only:
-- NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}/api
+- NEXT_PUBLIC_API_URL={config["protocol"]}://{target_ip}/{app_name}/api
 ```
 
 #### 2. docker-compose.yml - Remove deployment-specific container names:
@@ -2148,9 +2233,9 @@ grep -n "basePath" dashboard/next.config.js
   ACCESS YOUR APPLICATION
 ────────────────────────────────────────────────────────────────────────────────
 
-  🌐 Public URL:     https://{target_ip}/{app_name}/
-  🔌 API Endpoint:   https://{target_ip}/{app_name}/api/
-  📊 Monitor:        https://{target_ip}/deploy/activity
+  🌐 Public URL:     {config["protocol"]}://{target_ip}/{app_name}/
+  🔌 API Endpoint:   {config["protocol"]}://{target_ip}/{app_name}/api/
+  📊 Monitor:        {config["protocol"]}://{target_ip}/deploy/activity
   🔐 Auth:           OAuth2 (login required)
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -2158,7 +2243,7 @@ grep -n "basePath" dashboard/next.config.js
 ────────────────────────────────────────────────────────────────────────────────
 
   ✅ Next.js basePath: '/{app_name}'
-  ✅ NEXT_PUBLIC_API_URL: https://{target_ip}/{app_name}/api
+  ✅ NEXT_PUBLIC_API_URL: {config["protocol"]}://{target_ip}/{app_name}/api
   ✅ Nginx frontend location: /{app_name}/
   ✅ Nginx API location: /{app_name}/api/
 
@@ -2266,7 +2351,7 @@ Download new kit → Move to project → Type `/deploy`
 - **Future**: Use deploy command (`/deploy` - auto-updates from ZIP if needed)
 
 **Kit Version**: {version} UTC
-**App URL**: https://{target_ip}/{app_name}/
+**App URL**: {config["protocol"]}://{target_ip}/{app_name}/
 **Generated for**: {email}
 
 ---

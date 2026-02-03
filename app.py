@@ -417,6 +417,14 @@ def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new'
     timestamp = version  # For backward compatibility with template
     is_update = deploy_mode == 'update'
 
+    # Detect protocol early for use in templates (Fix for NameError on download-kit)
+    from services.framework_detector import FrameworkDetector
+    detector = FrameworkDetector()
+    protocol = detector.detect_ssl_on_server(target_ip, Config.SSH_KEY_PATH)
+
+    # Create minimal config dict for template strings
+    config = {"protocol": protocol}
+
     # Read the SSH private key
     try:
         with open(Config.SSH_KEY_PATH, 'r') as f:
@@ -1979,6 +1987,77 @@ curl -k -I https://{Config.DUCKDNS_DOMAIN}/{app_name}/
 curl -k https://{Config.DUCKDNS_DOMAIN}/{app_name}/api/
 ```
 
+---
+
+### Step 11: Verify Deployment with /deploy-verify
+
+**The deployment kit includes a `/deploy-verify` skill for automated verification.**
+
+#### 11.1 Install the Skill (First Time Only)
+
+If you haven't installed the deploy-verify skill yet:
+
+```bash
+# Check if already installed
+ls ~/.config/claude/skills/deploy-verify.yaml 2>/dev/null && echo "Already installed" || cp deploy-verify-skill.md ~/.config/claude/skills/deploy-verify.yaml
+```
+
+**What this skill does:**
+- ✓ Verifies portal health (homepage, /deploy/ pages)
+- ✓ Checks deployed app containers are running
+- ✓ Validates nginx routing configuration
+- ✓ Tests app endpoint accessibility (HTTP 200 vs 404/502)
+- ✓ Detects modern SPAs (React, Vue, Vite, Next.js)
+- ✓ Verifies real content (not default/error pages)
+- ✓ Provides root cause analysis for failures
+
+#### 11.2 Run Verification
+
+After deployment completes, verify everything works:
+
+```bash
+/deploy-verify {app_name}
+```
+
+**Expected Output:**
+```
+SECTION A: PORTAL HEALTH
+  ✓ Homepage shows Capsule Cloud content
+  ✓ /deploy/ page shows deployment access
+  ✓ /deploy/apps shows app catalog
+
+SECTION B: DEPLOYED APPLICATION ({app_name})
+  ✓ Containers running
+  ✓ Nginx config valid
+  ✓ Endpoint accessible (HTTP 200)
+  ✓ Returning real content
+  ✓✓ VERIFICATION PASSED ✓✓
+
+Access your app: https://{Config.DUCKDNS_DOMAIN}/{app_name}/
+```
+
+**If verification fails:**
+- Review the root cause analysis in the output
+- Follow the specific troubleshooting recommendations
+- Check container logs: `docker-compose logs`
+- Verify nginx config: `sudo nginx -t`
+
+---
+
+### Step 12: Return to Localhost
+
+Deployment is complete and verified! Exit the server:
+
+```bash
+exit  # Return to your local machine
+```
+
+**Your app is now live at:**
+- Public URL: https://{Config.DUCKDNS_DOMAIN}/{app_name}/
+- Portal: https://{Config.DUCKDNS_DOMAIN}/deploy/apps
+
+---
+
 ## Important Rules
 
 1. **Permissions**
@@ -2392,6 +2471,15 @@ sg docker -c 'docker compose up -d'
     except FileNotFoundError:
         skill_content = None  # Skill file optional for backward compatibility
 
+    # Load deploy-verify skill
+    try:
+        with open('/home/ubuntu/src/deploy-portal/deploy-verify-skill.md', 'r') as f:
+            deploy_verify_skill = f.read()
+        # Replace version placeholder with actual version
+        deploy_verify_skill = deploy_verify_skill.replace('DEPLOY_VERIFY_VERSION_PLACEHOLDER', version)
+    except FileNotFoundError:
+        deploy_verify_skill = None  # Skill file optional for backward compatibility
+
     # Create zip file
     zip_buffer = io.BytesIO()
     folder_name = f"deployment-kit-{app_name}-{timestamp}"
@@ -2408,6 +2496,10 @@ sg docker -c 'docker compose up -d'
         # Add deployment skill if available
         if skill_content:
             zf.writestr(f"{folder_name}/{Config.SKILL_FILE_PATH}", skill_content)
+
+        # Add deploy-verify skill if available
+        if deploy_verify_skill:
+            zf.writestr(f"{folder_name}/deploy-verify-skill.md", deploy_verify_skill)
 
         # Automation scripts
         for script_name, script_content in automation_scripts.items():
@@ -3093,13 +3185,17 @@ def cleanup_stale_sessions():
 
 @app.route('/api/deployment/version')
 def api_deployment_version():
-    """Return current deployment system version"""
+    """Return current deployment system and skill versions"""
     return jsonify({
         'version': DEPLOYMENT_VERSION,
         'version_display': f'{DEPLOYMENT_VERSION} UTC',
         'format': Config.DEPLOYMENT_VERSION_FORMAT,
         'timezone': 'UTC',
-        'generated_at': DEPLOYMENT_VERSION
+        'generated_at': DEPLOYMENT_VERSION,
+        'skills': {
+            'deploy': DEPLOYMENT_VERSION,  # deploy skill uses same version as system
+            'deploy-verify': DEPLOYMENT_VERSION  # deploy-verify skill also uses system version
+        }
     })
 
 @app.route('/api/deployment/active-sessions')
@@ -3179,16 +3275,36 @@ def api_unregister_session():
 @app.route('/api/deployment/skill')
 def api_deployment_skill():
     """Download the latest deployment skill file"""
-    skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_FILE_PATH)
+    # Support ?skill=deploy-verify parameter
+    skill_type = request.args.get('skill', 'deploy')
+
+    if skill_type == 'deploy-verify':
+        skill_path = os.path.join(os.path.dirname(__file__), 'deploy-verify-skill.md')
+        filename = 'deploy-verify-skill.md'
+        mimetype = 'text/markdown'
+    else:
+        skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_FILE_PATH)
+        filename = Config.SKILL_FILE_PATH
+        mimetype = 'text/yaml'
 
     if not os.path.exists(skill_path):
-        return jsonify({'error': 'Skill file not found'}), 404
+        return jsonify({'error': f'Skill file not found: {skill_type}'}), 404
 
-    return send_file(
-        skill_path,
-        mimetype='text/yaml',
-        as_attachment=True,
-        download_name=Config.SKILL_FILE_PATH
+    # Read and replace version placeholder
+    with open(skill_path, 'r') as f:
+        skill_content = f.read()
+
+    if skill_type == 'deploy-verify':
+        skill_content = skill_content.replace('DEPLOY_VERIFY_VERSION_PLACEHOLDER', DEPLOYMENT_VERSION)
+    else:
+        skill_content = skill_content.replace('DEPLOYMENT_VERSION_PLACEHOLDER', DEPLOYMENT_VERSION)
+
+    # Return as string response instead of file
+    from flask import Response
+    return Response(
+        skill_content,
+        mimetype=mimetype,
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
     )
 
 @app.route('/deploy/health')

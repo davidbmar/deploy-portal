@@ -2706,6 +2706,10 @@ I need you to deploy this project to our cloud server.
 
 ## Connection Details
 
+- **Host**: {instance_ip}
+- **User**: {Config.EC2_USER}
+- **SSH Key**: Use the capsule-deploy.pem file in this directory
+
 ## ⚠️ IMPORTANT: Checkpoint System
 
 **BEFORE making ANY changes**, this deployment will automatically create a checkpoint of the portal state.
@@ -2738,12 +2742,6 @@ Rollback using the checkpoint label shown in Phase 0:
 See deployment output for exact checkpoint labels.
 
 ---
-
-## Connection Details (continued)
-
-- **Host**: {instance_ip}
-- **User**: {Config.EC2_USER}
-- **SSH Key**: Use the capsule-deploy.pem file in this directory
 
 ## Setup Steps
 

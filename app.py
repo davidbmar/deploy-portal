@@ -692,6 +692,106 @@ sed -i 's|=http://{target_ip}|=https://{target_ip}|g' docker-compose.yml
 
 ---
 
+## ⚠️ CRITICAL: Next.js Environment Variable Validation
+
+**IMPORTANT:** Next.js `NEXT_PUBLIC_*` environment variables are baked into the build at **build time**, not runtime.
+
+### Common Deployment Issues
+
+#### Issue 1: "Failed to fetch" on Login
+
+**Cause:** `frontend/.env.local` contains localhost URLs that override docker-compose.yml during build
+
+**Symptoms:**
+```
+POST http://localhost:8020/api/user-auth/login net::ERR_CONNECTION_REFUSED
+```
+
+**Fix:**
+```bash
+# Update frontend/.env.local for cloud deployment
+echo "NEXT_PUBLIC_API_URL=https://{target_ip}/{app_name}" > frontend/.env.local
+
+# Rebuild frontend WITHOUT cache (critical!)
+docker compose build --no-cache frontend
+docker compose up -d frontend
+```
+
+#### Issue 2: 404 "Not Found" on API Calls
+
+**Cause:** `NEXT_PUBLIC_API_URL` includes `/api` suffix, but frontend code already appends `/api/`
+
+**Symptoms:**
+```
+POST /api/api/user-auth/login HTTP/1.1" 404 Not Found
+```
+
+**Fix:**
+```bash
+# ❌ Wrong (causes double /api/api/):
+NEXT_PUBLIC_API_URL=https://domain.com/app-name/api
+
+# ✅ Correct (frontend adds /api automatically):
+NEXT_PUBLIC_API_URL=https://domain.com/app-name
+```
+
+### Pre-Deployment Validation
+
+**Run these checks BEFORE deploying:**
+
+```bash
+# Check 1: frontend/.env.local for localhost URLs
+if [ -f "frontend/.env.local" ]; then
+  if grep -q "localhost" frontend/.env.local; then
+    echo "❌ ERROR: .env.local has localhost URLs"
+    echo "   Will cause 'Failed to fetch' in production"
+    exit 1
+  fi
+fi
+
+# Check 2: NEXT_PUBLIC_API_URL format in docker-compose.yml
+API_URL=$(grep "NEXT_PUBLIC_API_URL=" docker-compose.yml | cut -d'=' -f2-)
+if [[ "$API_URL" == *"/api"* ]]; then
+  echo "❌ ERROR: URL should NOT end with /api"
+  echo "   Frontend code adds /api automatically"
+  echo "   This causes double /api/api/ prefix (404 errors)"
+  exit 1
+fi
+
+# Check 3: HTTP vs HTTPS for cloud
+if [[ "$API_URL" == "http://"* ]] && [[ "$API_URL" != *"localhost"* ]]; then
+  echo "❌ ERROR: Cloud deployment must use HTTPS"
+  echo "   Browsers block HTTP requests from HTTPS pages"
+  exit 1
+fi
+
+echo "✅ Environment validation passed"
+```
+
+### Why `--no-cache` is Critical
+
+Without `--no-cache`, Docker reuses cached build layers containing old environment variable values:
+
+```bash
+# ❌ Wrong (uses cached layers with old env vars):
+docker compose build frontend
+
+# ✅ Correct (forces complete rebuild with new env vars):
+docker compose build --no-cache frontend
+```
+
+### Environment Variable Priority
+
+When Next.js builds:
+1. **`frontend/.env.local`** (highest priority, overrides everything)
+2. **`docker-compose.yml` environment section** (used if no .env.local)
+3. **Build args in Dockerfile** (lowest priority)
+
+**For cloud deployment:** Either update `frontend/.env.local` with HTTPS URL, or delete it to use `docker-compose.yml` values.
+
+---
+
+
 ## 🔄 STEP 0: Check and Update Deployment Skill (REQUIRED FIRST STEP)
 
 **⚠️ CRITICAL: Always check for skill updates BEFORE deploying!**
@@ -2605,6 +2705,41 @@ If you have issues connecting, ensure:
 I need you to deploy this project to our cloud server.
 
 ## Connection Details
+
+## ⚠️ IMPORTANT: Checkpoint System
+
+**BEFORE making ANY changes**, this deployment will automatically create a checkpoint of the portal state.
+
+### What are Checkpoints?
+
+Checkpoints are snapshots of the entire deployment portal (all apps, nginx configs, port registries). If deployment fails, you can instantly rollback.
+
+### Automatic Checkpoints
+
+The `/deploy` skill automatically creates:
+- **Phase 0**: Pre-deployment checkpoint (before ANY changes)
+- **Phase 7**: Post-deployment summary with rollback instructions
+
+### Manual Checkpoint (Optional)
+
+Before starting, you can create your own checkpoint:
+```bash
+ssh -i capsule-deploy.pem ubuntu@{instance_ip} \
+  "/usr/local/bin/capsule-checkpoint save 'Before deploying [project-name]'"
+```
+
+### If Deployment Fails
+
+Rollback using the checkpoint label shown in Phase 0:
+```bash
+/checkpoint restore cp-abc123-20260203-060000
+```
+
+See deployment output for exact checkpoint labels.
+
+---
+
+## Connection Details (continued)
 
 - **Host**: {instance_ip}
 - **User**: {Config.EC2_USER}

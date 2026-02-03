@@ -420,7 +420,11 @@ def generate_app_deployment_kit(email, ip, app_name, app_type, deploy_mode='new'
     # Detect protocol early for use in templates (Fix for NameError on download-kit)
     from services.framework_detector import FrameworkDetector
     detector = FrameworkDetector()
-    protocol = detector.detect_ssl_on_server(target_ip, Config.SSH_KEY_PATH)
+    detected_protocol = detector.detect_ssl_on_server(target_ip, Config.SSH_KEY_PATH)
+
+    # FORCE HTTPS: Portal serves over HTTPS, so all apps must use HTTPS to avoid mixed content
+    # Browser security policy blocks HTTP requests from HTTPS pages
+    protocol = "https"
 
     # Create minimal config dict for template strings
     config = {"protocol": protocol}
@@ -649,6 +653,42 @@ grep -E "container_name:.*-backend|container_name:.*-dashboard|container_name:.*
 1. Remove or genericize `container_name` lines
 2. Change URLs back to `http://localhost:8000/api`
 3. Remove basePath from next.config.js (or set to empty string)
+
+---
+
+## ⚠️ HTTP vs HTTPS Protocol Requirements
+
+**CRITICAL**: All URLs must use HTTPS when deploying to cloud.
+
+### Why HTTPS is Required
+- The deployment portal serves applications over HTTPS
+- Browsers enforce "mixed content policy" - they block HTTP requests from HTTPS pages
+- Using HTTP URLs will cause "Failed to fetch" errors in the browser
+
+### What to Check
+Before deployment, your source project's `docker-compose.yml` should use localhost URLs for local development:
+- `NEXT_PUBLIC_API_URL=http://localhost:8020` ← Correct for local development
+- `FRONTEND_URL=http://localhost:3020` ← Correct for local development
+
+**These will be automatically converted to HTTPS URLs during deployment.**
+
+### Automated Preflight Check
+The `/deploy` skill automatically checks for HTTP URLs in your source project and offers to fix them:
+- Scans your project's docker-compose.yml for `=http://` patterns that reference the cloud domain
+- Offers auto-fix (converts cloud URLs to `https://`)
+- Creates backup before making changes
+- **Note**: Localhost URLs are fine and expected - they'll be replaced during deployment
+
+### Manual Check (if not using /deploy skill)
+```bash
+# Check your source project for cloud URLs that should be HTTPS
+grep -E "NEXT_PUBLIC_API_URL=http://{target_ip}|FRONTEND_URL=http://{target_ip}" docker-compose.yml
+
+# If found, replace with HTTPS
+sed -i 's|=http://{target_ip}|=https://{target_ip}|g' docker-compose.yml
+```
+
+**Important**: Don't change localhost URLs - those are correct for local development!
 
 ---
 

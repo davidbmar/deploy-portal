@@ -51,6 +51,160 @@ commands:
       curl -s https://{portal_host}/api/deployment/active-sessions
       ```
 
+      ### 1.5 HTTP/HTTPS Preflight Check (NEW)
+
+      **CRITICAL**: Before extracting deployment kit, validate source project's docker-compose.yml.
+
+      The source project (not the deployment kit) contains the docker-compose.yml that will be deployed.
+      Check it for HTTP URLs pointing to cloud domains BEFORE starting deployment.
+
+      ```bash
+      echo "════════════════════════════════════════════════════════════"
+      echo "🔍 PREFLIGHT CHECK: HTTP/HTTPS Protocol Validation"
+      echo "════════════════════════════════════════════════════════════"
+      echo ""
+      echo "Checking source project's docker-compose.yml..."
+      echo "Location: $(pwd)/docker-compose.yml"
+      echo ""
+
+      # Check if docker-compose.yml exists in current directory (source project)
+      if [ ! -f "docker-compose.yml" ]; then
+        echo "⚠️  WARNING: docker-compose.yml not found in current directory"
+        echo "   Expected: $(pwd)/docker-compose.yml"
+        echo ""
+        echo "   This is normal if:"
+        echo "   - You're using a different compose file name"
+        echo "   - Your project structure differs from standard layout"
+        echo ""
+        read -p "Continue anyway? [y/N]: " CONTINUE
+        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+          echo "Deployment cancelled."
+          exit 1
+        fi
+      else
+        # Check if file contains localhost URLs (good) or cloud URLs that should be HTTPS
+        # We DON'T want to change localhost URLs - those are correct for local development
+
+        PROTOCOL_ISSUES=0
+
+        # Get cloud hostname from deployment kit config if available
+        CLOUD_HOST=$(unzip -p deployment-kit-*.zip "*/config.json" 2>/dev/null | grep -o '"ec2_host": "[^"]*"' | cut -d'"' -f4 | head -1)
+
+        if [ -n "$CLOUD_HOST" ]; then
+          echo "Checking for HTTP URLs pointing to cloud host: $CLOUD_HOST"
+          echo ""
+
+          # Check 1: Frontend API URL with cloud host
+          if grep -q "NEXT_PUBLIC_API_URL=http://$CLOUD_HOST" docker-compose.yml 2>/dev/null; then
+            echo "❌ ISSUE 1: Frontend using HTTP for cloud deployment"
+            grep "NEXT_PUBLIC_API_URL" docker-compose.yml | grep "http://$CLOUD_HOST" | head -1
+            echo "   Required: https://$CLOUD_HOST/..."
+            echo ""
+            echo "   Why: Portal served over HTTPS. Browsers block HTTP requests"
+            echo "        from HTTPS pages (mixed content security policy)."
+            echo ""
+            PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+          fi
+
+          # Check 2: Backend CORS URL with cloud host
+          if grep -q "FRONTEND_URL=http://$CLOUD_HOST" docker-compose.yml 2>/dev/null; then
+            echo "❌ ISSUE 2: Backend CORS using HTTP for cloud deployment"
+            grep "FRONTEND_URL" docker-compose.yml | grep "http://$CLOUD_HOST" | head -1
+            echo "   Required: https://$CLOUD_HOST/..."
+            echo ""
+            PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+          fi
+
+          # Check 3: OAuth Redirect URI with cloud host
+          if grep -q "REDIRECT_URI=http://$CLOUD_HOST" docker-compose.yml 2>/dev/null; then
+            echo "⚠️  WARNING: OAuth redirect using HTTP for cloud deployment"
+            grep "REDIRECT_URI" docker-compose.yml | grep "http://$CLOUD_HOST" | head -1
+            echo "   Recommended: https://$CLOUD_HOST/..."
+            echo ""
+            PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+          fi
+        else
+          echo "ℹ️  Could not detect cloud hostname from deployment kit"
+          echo "   Skipping cloud URL validation (localhost URLs are fine)"
+        fi
+
+        echo "────────────────────────────────────────────────────────────"
+
+        if [ "$PROTOCOL_ISSUES" -eq 0 ]; then
+          echo "✅ PROTOCOL CHECK PASSED"
+          echo "   Configuration looks good!"
+          echo ""
+          echo "   Note: Localhost URLs are correct for local development."
+          echo "   They will be replaced with HTTPS URLs during deployment."
+          echo ""
+        else
+          echo "❌ PROTOCOL CHECK FAILED: $PROTOCOL_ISSUES issue(s) found"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "⚠️  HTTP URLs Detected in Source Project"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Your source project's docker-compose.yml has HTTP URLs for"
+          echo "the cloud deployment. These should use HTTPS."
+          echo ""
+          echo "FIX OPTIONS:"
+          echo ""
+          echo "  [1] 🔧 Auto-fix: Replace cloud http:// with https:// (Recommended)"
+          echo "  [2] 📝 Manual: I'll fix docker-compose.yml myself"
+          echo "  [3] 🚫 Cancel: Stop deployment"
+          echo ""
+
+          read -p "Choose [1/2/3]: " PROTOCOL_FIX_CHOICE
+
+          case "$PROTOCOL_FIX_CHOICE" in
+            1)
+              echo ""
+              echo "Applying auto-fix..."
+
+              # Backup original
+              cp docker-compose.yml docker-compose.yml.preflight-backup
+
+              # Fix HTTP → HTTPS for cloud host only
+              if [ -n "$CLOUD_HOST" ]; then
+                sed -i.bak "s|=http://$CLOUD_HOST|=https://$CLOUD_HOST|g" docker-compose.yml
+                rm -f docker-compose.yml.bak
+
+                echo "✅ Auto-fix applied successfully!"
+                echo "   Replaced http://$CLOUD_HOST with https://$CLOUD_HOST"
+                echo "   Backup saved: docker-compose.yml.preflight-backup"
+                echo ""
+
+                # Show what changed
+                echo "Changes made:"
+                diff -u docker-compose.yml.preflight-backup docker-compose.yml | grep "^[-+]" | grep -v "^---\|^+++" | head -10
+                echo ""
+              fi
+
+              echo "Proceeding with deployment..."
+              ;;
+            2)
+              echo ""
+              echo "Please fix the HTTP URLs in docker-compose.yml and re-run /deploy"
+              echo ""
+              echo "Required changes:"
+              echo "  • Replace 'http://$CLOUD_HOST' with 'https://$CLOUD_HOST'"
+              echo "  • Keep localhost URLs unchanged (they're correct)"
+              echo ""
+              exit 1
+              ;;
+            3|*)
+              echo ""
+              echo "Deployment cancelled by user."
+              exit 1
+              ;;
+          esac
+        fi
+
+        echo "════════════════════════════════════════════════════════════"
+        echo ""
+      fi
+      ```
+
       ## Phase 2: Version Management
 
       ### 2.1 Compare Skill Version vs Portal Version
@@ -158,12 +312,15 @@ commands:
       cd "$TEMP_DIR"/deployment-kit-{app}-{version}
       ```
 
-      ### 5.2 HTTP/HTTPS Protocol Validation (Preflight Check)
+      ### 5.2 HTTP/HTTPS Protocol Validation
 
-      **CRITICAL**: Before deploying, validate that all URLs use HTTPS (not HTTP).
+      **NOTE**: HTTP/HTTPS validation has been moved to Phase 1.5 (runs before extraction).
 
-      The portal is served over HTTPS, so all application URLs must also use HTTPS.
-      Browsers block HTTP requests from HTTPS pages (mixed content security policy).
+      Phase 1.5 checks the SOURCE project's docker-compose.yml for HTTP URLs pointing to cloud hosts.
+      This happens early to catch issues before deployment begins.
+
+      If Phase 1.5 passed, you can proceed with deployment. The checks below are now redundant
+      but kept for backward compatibility with older deployment kits.
 
       ```bash
       echo "════════════════════════════════════════════════════════════"

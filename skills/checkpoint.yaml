@@ -1,0 +1,307 @@
+name: checkpoint
+version: 20260203.062700
+author: Capsule Cloud
+description: |
+  Portal-wide checkpoint and rollback system for safe deployments.
+  
+  Creates snapshots of the entire deployment portal state including all apps,
+  nginx configurations, and port registries. Enables instant rollback if
+  deployments fail.
+
+commands:
+  - name: checkpoint save
+    description: Create a new checkpoint with optional custom label
+    instructions: |
+      # Checkpoint Save Command
+      
+      Creates a portal-wide checkpoint capturing current deployment state.
+      
+      ## Steps
+      
+      1. **Determine description**:
+         - If user provided: Use their description
+         - If no description: Use "Manual checkpoint $(date)"
+      
+      2. **Check for custom label**:
+         - If user specified label (e.g., "baseline-v1"): Note it
+         - Otherwise: Auto-generated label will be created
+      
+      3. **SSH to server and create checkpoint**:
+         ```bash
+         ssh -i {pem_file} ubuntu@{portal_host} << 'CHECKPOINT_CMD'
+         cd /home/ubuntu/src/deploy-portal/scripts
+         
+         # Create checkpoint
+         if [ -n "{custom_label}" ]; then
+           LABEL=$(./capsule-checkpoint.sh save "{description}" --label {custom_label})
+         else
+           LABEL=$(./capsule-checkpoint.sh save "{description}")
+         fi
+         
+         echo "CHECKPOINT_LABEL=$LABEL"
+         CHECKPOINT_CMD
+         ```
+      
+      4. **Display result to user**:
+         ```
+         ═══════════════════════════════════════════════════════════
+                     CHECKPOINT CREATED
+         ═══════════════════════════════════════════════════════════
+         
+         📸 Checkpoint: {label}
+         📝 Description: {description}
+         🕐 Timestamp: {timestamp}
+         
+         To rollback to this state:
+           /checkpoint restore {label}
+         
+         To view all checkpoints:
+           /checkpoint list
+         ═══════════════════════════════════════════════════════════
+         ```
+      
+      5. **Store label for easy access**:
+         - Show user the label clearly
+         - Remind them they can restore later
+      
+      ## Usage Examples
+      
+      ```
+      # Simple checkpoint
+      /checkpoint save "Before deploying payment-service"
+      
+      # Checkpoint with custom label
+      /checkpoint save "Stable production baseline" --label prod-baseline-v1
+      
+      # Minimal checkpoint
+      /checkpoint save
+      ```
+
+  - name: checkpoint list
+    description: List all available checkpoints
+    instructions: |
+      # Checkpoint List Command
+      
+      Displays all portal checkpoints with metadata.
+      
+      ## Steps
+      
+      1. **SSH to server and get checkpoint list**:
+         ```bash
+         ssh -i {pem_file} ubuntu@{portal_host} << 'LIST_CMD'
+         cd /home/ubuntu/src/deploy-portal/scripts
+         ./capsule-checkpoint.sh list
+         LIST_CMD
+         ```
+      
+      2. **Display formatted output**:
+         - Show table with: label, timestamp, size, description
+         - Highlight latest checkpoint
+         - Show total count
+      
+      3. **Provide helpful hints**:
+         ```
+         💡 TIP: To restore a checkpoint, use:
+            /checkpoint restore {label}
+         
+         💡 To see details of a checkpoint:
+            /checkpoint show {label}
+         
+         💡 To clean old checkpoints:
+            /checkpoint clean --keep 10
+         ```
+      
+      ## Example Output
+      
+      ```
+      Available Checkpoints:
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      LABEL                          TIMESTAMP            SIZE
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      cp-abc123-20260203-060000      2026-02-03 06:00:00  45MB [LATEST]
+      cp-xyz789-20260203-055000      2026-02-03 05:50:00  42MB
+      prod-baseline-v1               2026-02-02 10:00:00  40MB
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      Total checkpoints: 3
+      ```
+
+  - name: checkpoint restore
+    description: Restore portal to a previous checkpoint
+    instructions: |
+      # Checkpoint Restore Command
+      
+      **WARNING**: This is a destructive operation that replaces current state!
+      
+      ## Steps
+      
+      1. **Confirm with user** (if not already confirmed):
+         ```
+         ⚠️  WARNING: Restore will replace current portal state!
+         
+         This will:
+         - Stop all containers
+         - Restore all app deployments
+         - Restore nginx configurations
+         - Restore port registry
+         - Restart all containers
+         
+         A safety backup will be created automatically.
+         
+         Continue with restore? [y/N]
+         ```
+      
+      2. **If confirmed, SSH to server and restore**:
+         ```bash
+         ssh -i {pem_file} ubuntu@{portal_host} << 'RESTORE_CMD'
+         cd /home/ubuntu/src/deploy-portal/scripts
+         ./capsule-checkpoint.sh restore {label}
+         RESTORE_CMD
+         ```
+      
+      3. **Monitor restore process**:
+         - Show each step: stopping containers, restoring files, etc.
+         - Display safety backup label
+         - Show any errors clearly
+      
+      4. **After restore, suggest verification**:
+         ```
+         ═══════════════════════════════════════════════════════════
+                     RESTORE COMPLETE
+         ═══════════════════════════════════════════════════════════
+         
+         ✅ Portal restored to: {label}
+         🛡️  Safety backup: {safety_label}
+         
+         If restore caused issues, rollback to safety backup:
+           /checkpoint restore {safety_label}
+         
+         Verify portal health:
+           /deploy-verify
+         ═══════════════════════════════════════════════════════════
+         ```
+      
+      ## Usage Examples
+      
+      ```
+      # Restore to specific checkpoint
+      /checkpoint restore cp-abc123-20260203-060000
+      
+      # Restore to labeled checkpoint
+      /checkpoint restore prod-baseline-v1
+      ```
+
+  - name: checkpoint show
+    description: Show detailed information about a checkpoint
+    instructions: |
+      # Checkpoint Show Command
+      
+      Displays detailed information about a specific checkpoint.
+      
+      ## Steps
+      
+      1. **SSH to server and get checkpoint details**:
+         ```bash
+         ssh -i {pem_file} ubuntu@{portal_host} << 'SHOW_CMD'
+         cd /home/ubuntu/src/deploy-portal/scripts
+         ./capsule-checkpoint.sh show {label}
+         SHOW_CMD
+         ```
+      
+      2. **Display formatted output**:
+         - Metadata (label, timestamp, description, user)
+         - Contents (directory structure)
+         - Size breakdown
+         - List of deployed apps included
+      
+      ## Usage Example
+      
+      ```
+      /checkpoint show cp-abc123-20260203-060000
+      ```
+      
+      ## Example Output
+      
+      ```
+      Checkpoint Details: cp-abc123-20260203-060000
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      
+      Metadata:
+      {
+        "label": "cp-abc123-20260203-060000",
+        "description": "Before deploying payment-service",
+        "timestamp": "2026-02-03 06:00:00 UTC",
+        "user": "ubuntu",
+        "version": "1.0.0"
+      }
+      
+      Deployed Apps:
+        - auth-service
+        - payment-service
+        - user-dashboard
+      
+      Size: 45MB
+      ```
+
+  - name: checkpoint clean
+    description: Remove old checkpoints to free disk space
+    instructions: |
+      # Checkpoint Clean Command
+      
+      Removes old checkpoints while keeping the most recent N checkpoints.
+      
+      ## Steps
+      
+      1. **Determine how many to keep**:
+         - Default: Keep last 20 checkpoints
+         - User can specify: `--keep 10`
+      
+      2. **Show what will be deleted** (if more than keep count):
+         ```
+         ⚠️  Will remove {count} old checkpoints
+         
+         Keeping most recent {keep} checkpoints:
+           - cp-abc123-20260203-060000 (latest)
+           - cp-xyz789-20260203-055000
+           ...
+         
+         Removing:
+           - cp-old123-20260201-100000
+           - cp-old456-20260131-150000
+         
+         Continue? [y/N]
+         ```
+      
+      3. **If confirmed, SSH to server and clean**:
+         ```bash
+         ssh -i {pem_file} ubuntu@{portal_host} << 'CLEAN_CMD'
+         cd /home/ubuntu/src/deploy-portal/scripts
+         ./capsule-checkpoint.sh clean --keep {keep_count}
+         CLEAN_CMD
+         ```
+      
+      4. **Display result**:
+         ```
+         ✅ Cleanup complete
+         
+         Removed: {removed_count} checkpoints
+         Remaining: {remaining_count} checkpoints
+         Disk space freed: {freed_space}
+         ```
+      
+      ## Usage Examples
+      
+      ```
+      # Keep last 20 (default)
+      /checkpoint clean
+      
+      # Keep last 10
+      /checkpoint clean --keep 10
+      
+      # Keep last 5
+      /checkpoint clean --keep 5
+      ```
+
+metadata:
+  portal_host: something.ai.internal.capsule.com
+  checkpoint_dir: /home/ubuntu/.capsule-checkpoints
+  script_path: /home/ubuntu/src/deploy-portal/scripts/capsule-checkpoint.sh

@@ -14,6 +14,36 @@ commands:
       You are an intelligent deployment assistant for Capsule Cloud. This skill helps users deploy applications with automatic version management and conflict detection.
 
       ## Phase 1: Pre-flight Checks
+      ## Phase 0: Pre-Deployment Checkpoint
+
+      **CRITICAL**: Create checkpoint BEFORE any deployment changes.
+
+      This captures the entire portal state so you can rollback if deployment fails.
+
+      ```bash
+      echo "════════════════════════════════════════════════════════════"
+      echo "📸 PHASE 0: CREATING PRE-DEPLOYMENT CHECKPOINT"
+      echo "════════════════════════════════════════════════════════════"
+      echo ""
+      
+      # Get deployment details for checkpoint description
+      APP_NAME="{app-name}"  # Replace with actual app name
+      
+      # Create pre-deployment checkpoint
+      echo "Creating checkpoint before deploying $APP_NAME..."
+      CHECKPOINT_0=$(ssh -i deployment-portal-vibeland-us-east-1.pem ubuntu@something.ai.internal.capsule.com \
+        "/home/ubuntu/src/deploy-portal/scripts/capsule-checkpoint.sh save 'Phase 0: Before deploying $APP_NAME'" | tail -1)
+      
+      echo ""
+      echo "✅ Checkpoint created: $CHECKPOINT_0"
+      echo ""
+      echo "💡 If deployment fails at any point, restore with:"
+      echo "   /checkpoint restore $CHECKPOINT_0"
+      echo ""
+      echo "════════════════════════════════════════════════════════════"
+      echo ""
+      ```
+
 
       ### 1.1 Scan for Deployment Kits
       Search the current directory for deployment ZIP files matching the pattern: `deployment-kit-*-*.zip`
@@ -451,14 +481,119 @@ commands:
       echo ""
       ```
 
-      ### 5.3 Read Deployment Instructions
+
+      ### 5.3 Next.js Environment Variable Validation (CRITICAL!)
+
+      **BEFORE copying files or building containers, validate Next.js environment variables:**
+
+      ```bash
+      echo "════════════════════════════════════════════════════════════"
+      echo "🔍 PREFLIGHT: Next.js Environment Variables"
+      echo "════════════════════════════════════════════════════════════"
+      echo ""
+
+      ENV_ISSUES=0
+
+      # Check 1: frontend/.env.local
+      if [ -f "frontend/.env.local" ]; then
+        echo "📄 Found frontend/.env.local"
+        
+        if grep -q "localhost" frontend/.env.local; then
+          echo "❌ ISSUE: .env.local contains localhost URLs"
+          echo "   This file will be copied into Docker build context"
+          echo "   and OVERRIDE docker-compose.yml environment variables"
+          echo ""
+          ENV_ISSUES=$((ENV_ISSUES + 1))
+        fi
+      fi
+
+      # Check 2: NEXT_PUBLIC_API_URL format
+      API_URL=$(grep "NEXT_PUBLIC_API_URL=" docker-compose.yml | head -1 | cut -d'=' -f2-)
+      
+      if [ ! -z "$API_URL" ]; then
+        echo "🔗 NEXT_PUBLIC_API_URL: $API_URL"
+        
+        if [[ "$API_URL" == *"/api"* ]]; then
+          echo "❌ ISSUE: URL should NOT end with /api"
+          echo "   Frontend code automatically appends /api/"
+          echo "   This causes /api/api/ double prefix → 404 errors"
+          ENV_ISSUES=$((ENV_ISSUES + 1))
+        fi
+        
+        if [[ "$API_URL" == "http://"* ]] && [[ "$API_URL" != *"localhost"* ]]; then
+          echo "❌ ISSUE: Using HTTP instead of HTTPS"
+          echo "   Browsers block HTTP from HTTPS pages"
+          ENV_ISSUES=$((ENV_ISSUES + 1))
+        fi
+      fi
+
+      echo "────────────────────────────────────────────────────────────"
+
+      if [ $ENV_ISSUES -gt 0 ]; then
+        echo "❌ VALIDATION FAILED: $ENV_ISSUES issue(s)"
+        echo ""
+        echo "FIX OPTIONS:"
+        echo "  [1] 🔧 Auto-fix (Recommended)"
+        echo "  [2] 📝 Manual: I'll fix myself"
+        echo "  [3] 🚫 Cancel deployment"
+        echo ""
+        
+        read -p "Choose [1/2/3]: " ENV_FIX_CHOICE
+        
+        case "$ENV_FIX_CHOICE" in
+          1)
+            echo ""
+            echo "Applying fixes..."
+            
+            # Fix 1: Update .env.local if exists
+            if [ -f "frontend/.env.local" ] && grep -q "localhost" frontend/.env.local; then
+              TARGET_URL=$(grep "NEXT_PUBLIC_API_URL=" docker-compose.yml | head -1 | cut -d'=' -f2- | sed 's|/api.*||')
+              
+              if [ ! -z "$TARGET_URL" ]; then
+                echo "NEXT_PUBLIC_API_URL=$TARGET_URL" > frontend/.env.local
+                echo "✅ Updated frontend/.env.local"
+              fi
+            fi
+            
+            # Fix 2: Remove /api suffix from docker-compose.yml
+            if grep -q "NEXT_PUBLIC_API_URL=.*/api" docker-compose.yml; then
+              sed -i.bak 's|\(NEXT_PUBLIC_API_URL=[^/]*\)/api.*|\1|g' docker-compose.yml
+              echo "✅ Removed /api suffix"
+            fi
+            
+            # Fix 3: Replace http:// with https://
+            sed -i.bak 's|NEXT_PUBLIC_API_URL=http://\([^l]\)|NEXT_PUBLIC_API_URL=https://\1|g' docker-compose.yml
+            
+            echo ""
+            echo "✅ All fixes applied! Proceeding..."
+            echo ""
+            ;;
+          2)
+            echo ""
+            echo "Please fix the issues and re-run /deploy"
+            exit 1
+            ;;
+          3|*)
+            echo ""
+            echo "Deployment cancelled."
+            exit 1
+            ;;
+        esac
+      else
+        echo "✅ VALIDATION PASSED"
+      fi
+
+      echo "════════════════════════════════════════════════════════════"
+      echo ""
+      ```
+      ### 5.4 Read Deployment Instructions
       Read and parse CLAUDE_PROMPT.md from extracted kit:
 
       ```bash
       cat CLAUDE_PROMPT.md
       ```
 
-      ### 5.4 Execute 11-Step Deployment Process
+      ### 5.5 Execute 11-Step Deployment Process
       Follow the deployment steps from CLAUDE_PROMPT.md:
 
       1. **Pre-flight Check**: Detect old deployment references
@@ -479,7 +614,7 @@ commands:
       - Ask user for input when needed (secrets, confirmation)
       - Log all commands executed
 
-      ### 5.5 Deployment Verification
+      ### 5.6 Deployment Verification
       After deployment completes, verify:
 
       ```bash
@@ -692,3 +827,55 @@ metadata:
   documentation: https://github.com/capsule-cloud/deploy-portal
   version_format: YYYYMMDD.HHmmss
   portal_api_base: /api/deployment
+
+      ## Phase 7: Rollback Guide & Checkpoint Summary
+
+      **After deployment completes**, display all checkpoints created during this deployment.
+
+      This gives the user clear rollback options if issues arise.
+
+      ```bash
+      echo ""
+      echo "═══════════════════════════════════════════════════════════"
+      echo "        DEPLOYMENT COMPLETE - CHECKPOINT SUMMARY"
+      echo "═══════════════════════════════════════════════════════════"
+      echo ""
+      echo "Deployment checkpoints created (newest to oldest):"
+      echo ""
+      echo "  📸 CHECKPOINT_0: Before deployment started"
+      echo "     Label: $CHECKPOINT_0"
+      echo "     Use case: Complete rollback to pre-deployment state"
+      echo ""
+      echo "  [Additional checkpoints created during deployment phases]"
+      echo ""
+      echo "═══════════════════════════════════════════════════════════"
+      echo "                    ROLLBACK INSTRUCTIONS"
+      echo "═══════════════════════════════════════════════════════════"
+      echo ""
+      echo "If deployment caused issues, you can rollback:"
+      echo ""
+      echo "  1. List all checkpoints:"
+      echo "     /checkpoint list"
+      echo ""
+      echo "  2. Restore to pre-deployment state:"
+      echo "     /checkpoint restore \$CHECKPOINT_0"
+      echo ""
+      echo "  3. View checkpoint details:"
+      echo "     /checkpoint show \$CHECKPOINT_0"
+      echo ""
+      echo "  4. Verify portal health after rollback:"
+      echo "     /deploy-verify"
+      echo ""
+      echo "💡 TIP: \$CHECKPOINT_0 is your safety net - it captures"
+      echo "   the exact state before deployment started."
+      echo ""
+      echo "═══════════════════════════════════════════════════════════"
+      echo ""
+      ```
+
+      **Why Checkpoints Matter**:
+      - **Safety**: Can always return to pre-deployment state
+      - **Debugging**: Know exact state at each phase
+      - **Confidence**: Deploy knowing you can rollback instantly
+      - **Zero downtime**: Restore takes seconds, not hours
+

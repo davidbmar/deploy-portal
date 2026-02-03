@@ -853,3 +853,53 @@ MIT License (or your chosen license)
 ---
 
 **Built with ❤️ for seamless cloud deployment**
+
+## Checkpoint System
+
+Capsule Cloud includes a portal-wide checkpoint system for safe deployments. Create snapshots of the entire portal state and rollback instantly if deployments fail.
+
+### Quick Start
+
+```bash
+# Create checkpoint before risky operation
+/checkpoint save "Before major update"
+
+# List all checkpoints
+/checkpoint list
+
+# Restore if something breaks
+/checkpoint restore cp-abc123-20260203-060000
+
+# View checkpoint details
+/checkpoint show cp-abc123-20260203-060000
+```
+
+### Automatic Checkpoints
+
+The `/deploy` skill automatically creates checkpoints before and after each deployment, providing instant rollback capability.
+
+### Features
+
+- **Portal-wide snapshots**: Captures all apps, nginx configs, and port registries
+- **Labeled checkpoints**: Auto-generated (`cp-abc123`) or custom (`prod-baseline-v1`)
+- **Instant rollback**: Restore entire portal state in seconds
+- **Safety backups**: Automatic safety backup before each restore
+- **Disk management**: Auto-cleanup keeps last 20 checkpoints
+
+### Documentation
+
+See [docs/CHECKPOINT_SYSTEM.md](docs/CHECKPOINT_SYSTEM.md) for comprehensive documentation including:
+- Creating and managing checkpoints
+- Automatic checkpoint integration with /deploy
+- Rollback procedures
+- Troubleshooting guide
+- Best practices
+
+### Storage
+
+Checkpoints stored at: `/home/ubuntu/.capsule-checkpoints/`
+
+Each checkpoint: 10-100MB depending on number of deployed apps.
+
+Recommended: Keep 10-20 checkpoints, clean weekly.
+

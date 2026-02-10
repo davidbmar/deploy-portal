@@ -470,10 +470,10 @@ Deploy with a single `/deploy` command using the included skill.
 
 #### FIRST TIME ONLY - Install the Skill (10 seconds)
 
-The `deploy-skill.yaml` file is in THIS folder. Run ONE command:
+The `skills/deploy/SKILL.md` file is in THIS folder. Install with ONE command:
 
 ```bash
-cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+mkdir -p ~/.claude/skills/deploy && cp skills/deploy/SKILL.md ~/.claude/skills/deploy/SKILL.md
 ```
 
 That's it! Skill is installed. You never need to do this again.
@@ -800,7 +800,7 @@ When Next.js builds:
 
 **⚠️ CRITICAL: Always check for skill updates BEFORE deploying!**
 
-This deployment kit includes a versioned `deploy-skill.yaml` file. Before proceeding with deployment, you MUST check if the skill in this ZIP is newer than your installed version and update if needed.
+This deployment kit includes a versioned `skills/deploy/SKILL.md` file. Before proceeding with deployment, you MUST check if the skill in this ZIP is newer than your installed version and update if needed.
 
 ### Why This Matters
 
@@ -813,8 +813,8 @@ The skill version is synchronized with the deployment kit. Using an outdated ski
 
 ```bash
 # Check if you have the skill installed
-if [ -f ~/.config/claude/skills/deploy.yaml ]; then
-    INSTALLED_VERSION=$(grep "^version:" ~/.config/claude/skills/deploy.yaml | awk '{{print $2}}')
+if [ -f ~/.claude/skills/deploy/SKILL.md ]; then
+    INSTALLED_VERSION=$(grep "Skill Version" ~/.claude/skills/deploy/SKILL.md | grep -oP "[0-9]+\\.[0-9]+")
     echo "Installed skill version: $INSTALLED_VERSION UTC"
 else
     echo "No skill installed yet"
@@ -826,7 +826,7 @@ fi
 
 ```bash
 # Get the skill version from this deployment kit
-ZIP_VERSION=$(grep "^version:" deploy-skill.yaml | awk '{{print $2}}')
+ZIP_VERSION=$(grep "Skill Version" skills/deploy/SKILL.md | grep -oP "[0-9]+\\.[0-9]+")
 echo "Deployment kit skill version: $ZIP_VERSION UTC"
 ```
 
@@ -837,8 +837,8 @@ echo "Deployment kit skill version: $ZIP_VERSION UTC"
 if [ -z "$INSTALLED_VERSION" ]; then
     echo "📦 First-time skill installation required"
     echo "Installing skill from deployment kit..."
-    mkdir -p ~/.config/claude/skills
-    cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+    mkdir -p ~/.claude/skills/deploy
+    cp skills/deploy/SKILL.md ~/.claude/skills/deploy/SKILL.md
     echo "✅ Skill installed: $ZIP_VERSION UTC"
     echo ""
     echo "🎯 TIP: Next time you deploy, just run '/deploy' in Claude Code!"
@@ -849,11 +849,11 @@ elif [[ "$ZIP_VERSION" > "$INSTALLED_VERSION" ]]; then
     echo "   Available: $ZIP_VERSION UTC"
     echo ""
     echo "Backing up old skill..."
-    mkdir -p ~/.config/claude/skills/.backups
-    cp ~/.config/claude/skills/deploy.yaml \\
-       ~/.config/claude/skills/.backups/deploy-${{INSTALLED_VERSION}}.yaml
+    mkdir -p ~/.claude/skills/deploy/.backups
+    cp ~/.claude/skills/deploy/SKILL.md \\
+       ~/.claude/skills/deploy/.backups/SKILL-${{INSTALLED_VERSION}}.md
     echo "Installing new skill..."
-    cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml
+    cp skills/deploy/SKILL.md ~/.claude/skills/deploy/SKILL.md
     echo "✅ Skill updated from $INSTALLED_VERSION UTC to $ZIP_VERSION UTC"
     echo ""
     echo "🎯 TIP: Use '/deploy' command in Claude Code for easier deployments!"
@@ -2170,7 +2170,7 @@ If you haven't installed the deploy-verify skill yet:
 
 ```bash
 # Check if already installed
-ls ~/.config/claude/skills/deploy-verify.yaml 2>/dev/null && echo "Already installed" || cp deploy-verify-skill.md ~/.config/claude/skills/deploy-verify.yaml
+ls ~/.claude/skills/deploy-verify/SKILL.md 2>/dev/null && echo "Already installed" || (mkdir -p ~/.claude/skills/deploy-verify && cp deploy-verify-skill.md ~/.claude/skills/deploy-verify/SKILL.md)
 ```
 
 **What this skill does:**
@@ -2567,7 +2567,7 @@ grep -n "basePath" dashboard/next.config.js
 
 **Step 1:** Run this in your Downloads folder:
 ```bash
-unzip deployment-kit-{app_name}-{timestamp}.zip && cd deployment-kit-{app_name}-{timestamp} && cp deploy-skill.yaml ~/.config/claude/skills/deploy.yaml && echo "✅ Skill installed!"
+unzip deployment-kit-{app_name}-{timestamp}.zip && cd deployment-kit-{app_name}-{timestamp} && mkdir -p ~/.claude/skills/deploy && cp skills/deploy/SKILL.md ~/.claude/skills/deploy/SKILL.md && echo "✅ Skill installed!"
 ```
 
 **Step 2:** Move ZIP to your project and deploy:
@@ -2633,18 +2633,16 @@ sg docker -c 'docker compose up -d'
     env_template = generate_env_template(app_name, app_type, dashboard_api_key)
 
     # Load and version the deployment skill
-    skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_FILE_PATH)
+    skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_TEMPLATE_PATH)
     try:
         with open(skill_path, 'r') as f:
             skill_content = f.read()
         # Replace version placeholder with actual version
         skill_content = skill_content.replace('DEPLOYMENT_VERSION_PLACEHOLDER', version)
-        # Validate YAML syntax before including in deployment kit
-        try:
-            yaml.safe_load(skill_content)
-        except yaml.YAMLError as e:
-            logging.error(f'deploy-skill.yaml has invalid YAML syntax: {e}')
-            return None, f'Skill file has invalid YAML syntax: {e}'
+        # Validate skill template has YAML frontmatter
+        if not skill_content.startswith('---'):
+            logging.error('deploy-skill-template.md missing YAML frontmatter')
+            return None, 'Skill template missing YAML frontmatter'
     except FileNotFoundError:
         skill_content = None  # Skill file optional for backward compatibility
 
@@ -2672,7 +2670,7 @@ sg docker -c 'docker compose up -d'
 
         # Add deployment skill if available
         if skill_content:
-            zf.writestr(f"{folder_name}/{Config.SKILL_FILE_PATH}", skill_content)
+            zf.writestr(f"{folder_name}/{Config.SKILL_ZIP_PATH}", skill_content)
 
         # Add deploy-verify skill if available
         if deploy_verify_skill:
@@ -3493,9 +3491,9 @@ def api_deployment_skill():
         filename = 'deploy-verify-skill.md'
         mimetype = 'text/markdown'
     else:
-        skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_FILE_PATH)
-        filename = Config.SKILL_FILE_PATH
-        mimetype = 'text/yaml'
+        skill_path = os.path.join(os.path.dirname(__file__), Config.SKILL_TEMPLATE_PATH)
+        filename = 'SKILL.md'
+        mimetype = 'text/markdown'
 
     if not os.path.exists(skill_path):
         return jsonify({'error': f'Skill file not found: {skill_type}'}), 404

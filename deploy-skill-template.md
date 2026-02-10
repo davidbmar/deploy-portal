@@ -1,0 +1,839 @@
+---
+name: deploy
+description: |
+  Intelligent deployment skill for Capsule Cloud applications with automatic
+  version management, ZIP detection, concurrent deployment protection, and
+  HTTP/HTTPS protocol validation preflight check.
+---
+
+**Skill Version**: DEPLOYMENT_VERSION_PLACEHOLDER
+
+# Capsule Cloud Deployment Skill
+
+You are an intelligent deployment assistant for Capsule Cloud. This skill helps users deploy applications with automatic version management and conflict detection.
+
+## Phase 1: Pre-flight Checks
+## Phase 0: Pre-Deployment Checkpoint
+
+**CRITICAL**: Create checkpoint BEFORE any deployment changes.
+
+This captures the entire portal state so you can rollback if deployment fails.
+
+```bash
+echo "════════════════════════════════════════════════════════════"
+echo "📸 PHASE 0: CREATING PRE-DEPLOYMENT CHECKPOINT"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+# Get deployment details for checkpoint description
+APP_NAME="{app-name}"  # Replace with actual app name
+
+# Create pre-deployment checkpoint
+echo "Creating checkpoint before deploying $APP_NAME..."
+CHECKPOINT_0=$(ssh -i deployment-portal-vibeland-us-east-1.pem ubuntu@something.ai.internal.capsule.com \
+  "/home/ubuntu/src/deploy-portal/scripts/capsule-checkpoint.sh save 'Phase 0: Before deploying $APP_NAME'" | tail -1)
+
+echo ""
+echo "✅ Checkpoint created: $CHECKPOINT_0"
+echo ""
+echo "💡 If deployment fails at any point, restore with:"
+echo "   /checkpoint restore $CHECKPOINT_0"
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo ""
+```
+
+
+### 1.1 Scan for Deployment Kits
+Search the current directory for deployment ZIP files matching the pattern: `deployment-kit-*-*.zip`
+
+```bash
+find . -maxdepth 1 -name "deployment-kit-*.zip" -type f
+```
+
+### 1.2 Parse ZIP Versions
+Extract app names and versions from filenames. Format: `deployment-kit-{app-name}-{version}.zip`
+- Version format: YYYYMMDD.HHmmss (UTC, lexicographically sortable)
+- Example: `deployment-kit-contract-manager-20260116.143022.zip`
+
+Parse each ZIP filename and extract:
+- App name (between "deployment-kit-" and last "-")
+- Version (after last "-", before ".zip")
+- File modification time for sorting fallback
+
+### 1.3 Check Portal Version
+Extract config.json from the LATEST ZIP to get portal URL:
+
+```bash
+# Get portal host from latest ZIP's config.json
+unzip -p deployment-kit-{app}-{version}.zip "*/config.json" | grep -o '"ec2_host": "[^"]*"' | cut -d'"' -f4
+```
+
+Query portal version API (if portal is reachable):
+```bash
+curl -s https://{portal_host}/api/deployment/version
+```
+
+### 1.4 Check Active Sessions
+Query portal for concurrent deployments (if portal is reachable):
+```bash
+curl -s https://{portal_host}/api/deployment/active-sessions
+```
+
+### 1.5 HTTP/HTTPS Preflight Check (NEW)
+
+**CRITICAL**: Before extracting deployment kit, validate source project's docker-compose.yml.
+
+The source project (not the deployment kit) contains the docker-compose.yml that will be deployed.
+Check it for HTTP URLs pointing to cloud domains BEFORE starting deployment.
+
+```bash
+echo "════════════════════════════════════════════════════════════"
+echo "🔍 PREFLIGHT CHECK: HTTP/HTTPS Protocol Validation"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Checking source project's docker-compose.yml..."
+echo "Location: $(pwd)/docker-compose.yml"
+echo ""
+
+# Check if docker-compose.yml exists in current directory (source project)
+if [ ! -f "docker-compose.yml" ]; then
+  echo "⚠️  WARNING: docker-compose.yml not found in current directory"
+  echo "   Expected: $(pwd)/docker-compose.yml"
+  echo ""
+  echo "   This is normal if:"
+  echo "   - You're using a different compose file name"
+  echo "   - Your project structure differs from standard layout"
+  echo ""
+  read -p "Continue anyway? [y/N]: " CONTINUE
+  if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+    echo "Deployment cancelled."
+    exit 1
+  fi
+else
+  # Check if file contains localhost URLs (good) or cloud URLs that should be HTTPS
+  # We DON'T want to change localhost URLs - those are correct for local development
+
+  PROTOCOL_ISSUES=0
+
+  # Get cloud hostname from deployment kit config if available
+  CLOUD_HOST=$(unzip -p deployment-kit-*.zip "*/config.json" 2>/dev/null | grep -o '"ec2_host": "[^"]*"' | cut -d'"' -f4 | head -1)
+
+  if [ -n "$CLOUD_HOST" ]; then
+    echo "Checking for HTTP URLs pointing to cloud host: $CLOUD_HOST"
+    echo ""
+
+    # Check 1: Frontend API URL with cloud host
+    if grep -q "NEXT_PUBLIC_API_URL=http://$CLOUD_HOST" docker-compose.yml 2>/dev/null; then
+      echo "❌ ISSUE 1: Frontend using HTTP for cloud deployment"
+      grep "NEXT_PUBLIC_API_URL" docker-compose.yml | grep "http://$CLOUD_HOST" | head -1
+      echo "   Required: https://$CLOUD_HOST/..."
+      echo ""
+      echo "   Why: Portal served over HTTPS. Browsers block HTTP requests"
+      echo "        from HTTPS pages (mixed content security policy)."
+      echo ""
+      PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+    fi
+
+    # Check 2: Backend CORS URL with cloud host
+    if grep -q "FRONTEND_URL=http://$CLOUD_HOST" docker-compose.yml 2>/dev/null; then
+      echo "❌ ISSUE 2: Backend CORS using HTTP for cloud deployment"
+      grep "FRONTEND_URL" docker-compose.yml | grep "http://$CLOUD_HOST" | head -1
+      echo "   Required: https://$CLOUD_HOST/..."
+      echo ""
+      PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+    fi
+
+    # Check 3: OAuth Redirect URI with cloud host
+    if grep -q "REDIRECT_URI=http://$CLOUD_HOST" docker-compose.yml 2>/dev/null; then
+      echo "⚠️  WARNING: OAuth redirect using HTTP for cloud deployment"
+      grep "REDIRECT_URI" docker-compose.yml | grep "http://$CLOUD_HOST" | head -1
+      echo "   Recommended: https://$CLOUD_HOST/..."
+      echo ""
+      PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+    fi
+  else
+    echo "ℹ️  Could not detect cloud hostname from deployment kit"
+    echo "   Skipping cloud URL validation (localhost URLs are fine)"
+  fi
+
+  echo "────────────────────────────────────────────────────────────"
+
+  if [ "$PROTOCOL_ISSUES" -eq 0 ]; then
+    echo "✅ PROTOCOL CHECK PASSED"
+    echo "   Configuration looks good!"
+    echo ""
+    echo "   Note: Localhost URLs are correct for local development."
+    echo "   They will be replaced with HTTPS URLs during deployment."
+    echo ""
+  else
+    echo "❌ PROTOCOL CHECK FAILED: $PROTOCOL_ISSUES issue(s) found"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "⚠️  HTTP URLs Detected in Source Project"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Your source project's docker-compose.yml has HTTP URLs for"
+    echo "the cloud deployment. These should use HTTPS."
+    echo ""
+    echo "FIX OPTIONS:"
+    echo ""
+    echo "  [1] 🔧 Auto-fix: Replace cloud http:// with https:// (Recommended)"
+    echo "  [2] 📝 Manual: I'll fix docker-compose.yml myself"
+    echo "  [3] 🚫 Cancel: Stop deployment"
+    echo ""
+
+    read -p "Choose [1/2/3]: " PROTOCOL_FIX_CHOICE
+
+    case "$PROTOCOL_FIX_CHOICE" in
+      1)
+        echo ""
+        echo "Applying auto-fix..."
+
+        # Backup original
+        cp docker-compose.yml docker-compose.yml.preflight-backup
+
+        # Fix HTTP → HTTPS for cloud host only
+        if [ -n "$CLOUD_HOST" ]; then
+          sed -i.bak "s|=http://$CLOUD_HOST|=https://$CLOUD_HOST|g" docker-compose.yml
+          rm -f docker-compose.yml.bak
+
+          echo "✅ Auto-fix applied successfully!"
+          echo "   Replaced http://$CLOUD_HOST with https://$CLOUD_HOST"
+          echo "   Backup saved: docker-compose.yml.preflight-backup"
+          echo ""
+
+          # Show what changed
+          echo "Changes made:"
+          diff -u docker-compose.yml.preflight-backup docker-compose.yml | grep "^[-+]" | grep -v "^---\|^+++" | head -10
+          echo ""
+        fi
+
+        echo "Proceeding with deployment..."
+        ;;
+      2)
+        echo ""
+        echo "Please fix the HTTP URLs in docker-compose.yml and re-run /deploy"
+        echo ""
+        echo "Required changes:"
+        echo "  • Replace 'http://$CLOUD_HOST' with 'https://$CLOUD_HOST'"
+        echo "  • Keep localhost URLs unchanged (they're correct)"
+        echo ""
+        exit 1
+        ;;
+      3|*)
+        echo ""
+        echo "Deployment cancelled by user."
+        exit 1
+        ;;
+    esac
+  fi
+
+  echo "════════════════════════════════════════════════════════════"
+  echo ""
+fi
+```
+
+## Phase 2: Version Management
+
+### 2.1 Compare Skill Version vs Portal Version
+- Skill version: Embedded in this YAML file (version field at top)
+- Portal version: From `/api/deployment/version` endpoint
+- ZIP version: From filename and config.json
+
+If portal version > skill version:
+1. Inform user: "Deployment system has been updated. Downloading latest skill..."
+2. Download new skill:
+   ```bash
+   curl -s -o ~/.config/claude/skills/deploy.yaml.new https://{portal_host}/api/deployment/skill
+   ```
+3. Backup current skill:
+   ```bash
+   mkdir -p ~/.config/claude/skills/.backups
+   cp ~/.config/claude/skills/deploy.yaml ~/.config/claude/skills/.backups/deploy-{current_version}.yaml
+   ```
+4. Replace skill atomically:
+   ```bash
+   mv ~/.config/claude/skills/deploy.yaml.new ~/.config/claude/skills/deploy.yaml
+   ```
+5. Inform user: "Skill updated from {old_version} to {new_version}. Please run /deploy again."
+6. STOP execution and ask user to re-run /deploy
+
+If versions match or portal unreachable: Continue to next phase
+
+## Phase 3: ZIP Selection & Display
+
+### 3.1 Group and Sort ZIPs
+Group ZIPs by app name and sort by version (descending):
+
+Display to user:
+```
+═══════════════════════════════════════════════════════════════════
+                    DEPLOYMENT KITS FOUND
+═══════════════════════════════════════════════════════════════════
+
+{app-name-1}:
+  1. Version {version-1} ({time-ago}) [LATEST]
+  2. Version {version-2} ({time-ago})
+
+{app-name-2}:
+  1. Version {version-1} ({time-ago}) [LATEST]
+
+───────────────────────────────────────────────────────────────────
+Auto-selected: {app-name-1} (version {version-1})
+───────────────────────────────────────────────────────────────────
+```
+
+### 3.2 Confirm Selection
+Ask user: "Deploy {app-name} with version {version}? [Y/n/choose different]"
+- Y or Enter: Proceed with auto-selected (latest)
+- n: Cancel deployment
+- "choose different": Show numbered list and ask user to select
+
+## Phase 4: Concurrent Deployment Check
+
+### 4.1 Query Active Sessions
+If portal is reachable, check for active sessions from Phase 1.4 results.
+
+If active session found for same app:
+```
+⚠️  CONCURRENT DEPLOYMENT DETECTED
+═══════════════════════════════════════════════════════════════════
+
+Another Claude window is currently deploying:
+  App: {app_name}
+  Started: {time_ago}
+  Your email: {user_email}
+
+───────────────────────────────────────────────────────────────────
+Options:
+1. Wait and retry (check again in 30 seconds)
+2. Continue anyway (may cause conflicts)
+3. Cancel deployment
+
+Choose [1/2/3]:
+```
+
+Handle user choice:
+- 1: Sleep 30 seconds, re-check, repeat
+- 2: Log warning and continue
+- 3: Exit
+
+### 4.2 Register Deployment Session
+If no conflicts or user chose to continue:
+
+```bash
+curl -X POST https://{portal_host}/api/deployment/register-session \
+  -H "Content-Type: application/json" \
+  -d '{"app_name": "{app_name}", "version": "{version}"}'
+```
+
+Store session registration status for cleanup later.
+
+## Phase 5: Deployment Execution
+
+### 5.1 Extract Deployment Kit
+Create temporary directory and extract ZIP:
+
+```bash
+TEMP_DIR=$(mktemp -d)
+unzip -q deployment-kit-{app}-{version}.zip -d "$TEMP_DIR"
+cd "$TEMP_DIR"/deployment-kit-{app}-{version}
+```
+
+### 5.2 HTTP/HTTPS Protocol Validation
+
+**NOTE**: HTTP/HTTPS validation has been moved to Phase 1.5 (runs before extraction).
+
+Phase 1.5 checks the SOURCE project's docker-compose.yml for HTTP URLs pointing to cloud hosts.
+This happens early to catch issues before deployment begins.
+
+If Phase 1.5 passed, you can proceed with deployment. The checks below are now redundant
+but kept for backward compatibility with older deployment kits.
+
+```bash
+echo "════════════════════════════════════════════════════════════"
+echo "🔍 PREFLIGHT CHECK: HTTP/HTTPS Protocol Validation"
+echo "════════════════════════════════════════════════════════════"
+
+PROTOCOL_ISSUES=0
+
+if [ -f "docker-compose.yml" ]; then
+  echo "Scanning docker-compose.yml for HTTP URLs..."
+  echo ""
+
+  # Check 1: Frontend API URL
+  if grep -q "NEXT_PUBLIC_API_URL=http://" docker-compose.yml 2>/dev/null; then
+    echo "❌ ISSUE 1: Frontend using HTTP protocol"
+    echo "   Found: NEXT_PUBLIC_API_URL=http://..."
+    echo "   Required: https://..."
+    echo ""
+    echo "   Why: Portal served over HTTPS. Browsers block HTTP requests"
+    echo "        from HTTPS pages (mixed content security policy)."
+    echo ""
+    echo "   Impact: Login and API calls will fail with 'Failed to fetch'"
+    echo "   Location: docker-compose.yml"
+    echo ""
+    PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+  fi
+
+  # Check 2: Backend CORS URL
+  if grep -q "FRONTEND_URL=http://" docker-compose.yml 2>/dev/null; then
+    echo "❌ ISSUE 2: Backend CORS using HTTP protocol"
+    echo "   Found: FRONTEND_URL=http://..."
+    echo "   Required: https://..."
+    echo ""
+    echo "   Why: Backend CORS must allow HTTPS origin"
+    echo ""
+    echo "   Impact: CORS will reject API requests from frontend"
+    echo "   Location: docker-compose.yml"
+    echo ""
+    PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+  fi
+
+  # Check 3: OAuth Redirect URI
+  if grep -q "REDIRECT_URI=http://" docker-compose.yml 2>/dev/null; then
+    echo "⚠️  WARNING: OAuth redirect using HTTP protocol"
+    echo "   Found: *_REDIRECT_URI=http://..."
+    echo "   Recommended: https://..."
+    echo ""
+    echo "   Impact: OAuth callbacks may fail"
+    echo "   Location: docker-compose.yml"
+    echo ""
+    PROTOCOL_ISSUES=$((PROTOCOL_ISSUES + 1))
+  fi
+
+else
+  echo "⚠️  WARNING: docker-compose.yml not found, skipping protocol check"
+fi
+
+echo "────────────────────────────────────────────────────────────"
+
+if [ "$PROTOCOL_ISSUES" -eq 0 ]; then
+  echo "✅ PROTOCOL CHECK PASSED"
+  echo "   All URLs use HTTPS - configuration is correct!"
+  echo ""
+else
+  echo "❌ PROTOCOL CHECK FAILED: $PROTOCOL_ISSUES issue(s) found"
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "⚠️  DEPLOYMENT WILL FAIL - HTTP URLs Detected"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "The portal uses HTTPS. Your configuration has HTTP URLs."
+  echo "This will cause 'Failed to fetch' errors in the browser."
+  echo ""
+  echo "FIX OPTIONS:"
+  echo ""
+  echo "  [1] 🔧 Auto-fix: Replace all http:// with https:// (Recommended)"
+  echo "  [2] 📝 Manual: I'll fix docker-compose.yml myself"
+  echo "  [3] 🚫 Cancel: Stop deployment"
+  echo ""
+
+  # Ask user for choice
+  read -p "Choose [1/2/3]: " PROTOCOL_FIX_CHOICE
+
+  case "$PROTOCOL_FIX_CHOICE" in
+    1)
+      echo ""
+      echo "Applying auto-fix..."
+
+      # Backup original
+      cp docker-compose.yml docker-compose.yml.preflight-backup
+
+      # Fix HTTP → HTTPS
+      sed -i.bak 's|=http://|=https://|g' docker-compose.yml
+      rm -f docker-compose.yml.bak
+
+      echo "✅ Auto-fix applied successfully!"
+      echo "   Replaced all http:// with https://"
+      echo "   Backup saved: docker-compose.yml.preflight-backup"
+      echo ""
+
+      # Show what changed
+      echo "Changes made:"
+      diff -u docker-compose.yml.preflight-backup docker-compose.yml | grep "^[-+]" | grep -v "^---\|^+++" | head -10
+      echo ""
+
+      echo "Proceeding with deployment..."
+      ;;
+    2)
+      echo ""
+      echo "Please fix the HTTP URLs in docker-compose.yml and re-run /deploy"
+      echo ""
+      echo "Required changes:"
+      echo "  • Replace all 'http://' with 'https://'"
+      echo "  • Ensure NEXT_PUBLIC_API_URL uses https://"
+      echo "  • Ensure FRONTEND_URL uses https://"
+      echo ""
+      exit 1
+      ;;
+    3|*)
+      echo ""
+      echo "Deployment cancelled by user."
+      exit 1
+      ;;
+  esac
+fi
+
+echo "════════════════════════════════════════════════════════════"
+echo ""
+```
+
+
+### 5.3 Next.js Environment Variable Validation (CRITICAL!)
+
+**BEFORE copying files or building containers, validate Next.js environment variables:**
+
+```bash
+echo "════════════════════════════════════════════════════════════"
+echo "🔍 PREFLIGHT: Next.js Environment Variables"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+ENV_ISSUES=0
+
+# Check 1: frontend/.env.local
+if [ -f "frontend/.env.local" ]; then
+  echo "📄 Found frontend/.env.local"
+  
+  if grep -q "localhost" frontend/.env.local; then
+    echo "❌ ISSUE: .env.local contains localhost URLs"
+    echo "   This file will be copied into Docker build context"
+    echo "   and OVERRIDE docker-compose.yml environment variables"
+    echo ""
+    ENV_ISSUES=$((ENV_ISSUES + 1))
+  fi
+fi
+
+# Check 2: NEXT_PUBLIC_API_URL format
+API_URL=$(grep "NEXT_PUBLIC_API_URL=" docker-compose.yml | head -1 | cut -d'=' -f2-)
+
+if [ ! -z "$API_URL" ]; then
+  echo "🔗 NEXT_PUBLIC_API_URL: $API_URL"
+  
+  if [[ "$API_URL" == *"/api"* ]]; then
+    echo "❌ ISSUE: URL should NOT end with /api"
+    echo "   Frontend code automatically appends /api/"
+    echo "   This causes /api/api/ double prefix → 404 errors"
+    ENV_ISSUES=$((ENV_ISSUES + 1))
+  fi
+  
+  if [[ "$API_URL" == "http://"* ]] && [[ "$API_URL" != *"localhost"* ]]; then
+    echo "❌ ISSUE: Using HTTP instead of HTTPS"
+    echo "   Browsers block HTTP from HTTPS pages"
+    ENV_ISSUES=$((ENV_ISSUES + 1))
+  fi
+fi
+
+echo "────────────────────────────────────────────────────────────"
+
+if [ $ENV_ISSUES -gt 0 ]; then
+  echo "❌ VALIDATION FAILED: $ENV_ISSUES issue(s)"
+  echo ""
+  echo "FIX OPTIONS:"
+  echo "  [1] 🔧 Auto-fix (Recommended)"
+  echo "  [2] 📝 Manual: I'll fix myself"
+  echo "  [3] 🚫 Cancel deployment"
+  echo ""
+  
+  read -p "Choose [1/2/3]: " ENV_FIX_CHOICE
+  
+  case "$ENV_FIX_CHOICE" in
+    1)
+      echo ""
+      echo "Applying fixes..."
+      
+      # Fix 1: Update .env.local if exists
+      if [ -f "frontend/.env.local" ] && grep -q "localhost" frontend/.env.local; then
+        TARGET_URL=$(grep "NEXT_PUBLIC_API_URL=" docker-compose.yml | head -1 | cut -d'=' -f2- | sed 's|/api.*||')
+        
+        if [ ! -z "$TARGET_URL" ]; then
+          echo "NEXT_PUBLIC_API_URL=$TARGET_URL" > frontend/.env.local
+          echo "✅ Updated frontend/.env.local"
+        fi
+      fi
+      
+      # Fix 2: Remove /api suffix from docker-compose.yml
+      if grep -q "NEXT_PUBLIC_API_URL=.*/api" docker-compose.yml; then
+        sed -i.bak 's|\(NEXT_PUBLIC_API_URL=[^/]*\)/api.*|\1|g' docker-compose.yml
+        echo "✅ Removed /api suffix"
+      fi
+      
+      # Fix 3: Replace http:// with https://
+      sed -i.bak 's|NEXT_PUBLIC_API_URL=http://\([^l]\)|NEXT_PUBLIC_API_URL=https://\1|g' docker-compose.yml
+      
+      echo ""
+      echo "✅ All fixes applied! Proceeding..."
+      echo ""
+      ;;
+    2)
+      echo ""
+      echo "Please fix the issues and re-run /deploy"
+      exit 1
+      ;;
+    3|*)
+      echo ""
+      echo "Deployment cancelled."
+      exit 1
+      ;;
+  esac
+else
+  echo "✅ VALIDATION PASSED"
+fi
+
+echo "════════════════════════════════════════════════════════════"
+echo ""
+```
+### 5.4 Read Deployment Instructions
+Read and parse CLAUDE_PROMPT.md from extracted kit:
+
+```bash
+cat CLAUDE_PROMPT.md
+```
+
+### 5.5 Execute 11-Step Deployment Process
+Follow the deployment steps from CLAUDE_PROMPT.md:
+
+1. **Pre-flight Check**: Detect old deployment references
+2. **Display Summary**: Show deployment configuration (read from config.json)
+3. **Fix SSH Permissions**: chmod 600 on PEM file
+4. **Copy to Server**: rsync with excludes
+5. **Check Prerequisites**: Docker, docker-compose, permissions
+6. **Configure App**: Next.js basePath, API URLs, etc.
+7. **Port Conflict Check**: MANDATORY - check for conflicts
+8. **Docker Deploy**: Start containers with sg docker -c wrapper
+9. **Configure Nginx**: Create versioned route configuration
+
+   Execute nginx configuration script:
+
+   ```bash
+   cd /home/ubuntu/deployments/{app_name}
+
+   # Option 1: Auto-configure (RECOMMENDED)
+   /home/ubuntu/src/deploy-portal/automation/auto-configure-nginx.sh .
+
+   # Option 2: Manual with nginx-register
+   APP_NAME="{app_name}"
+   VERSION="{version}"
+   FRONTEND_PORT="{frontend_port}"
+   BACKEND_PORT="{backend_port}"
+
+   sudo /home/ubuntu/src/deploy-portal/automation/nginx-register.sh \
+     add-multiservice "$APP_NAME" "$FRONTEND_PORT" "$BACKEND_PORT" auto "$VERSION"
+   ```
+
+   **What this creates:**
+   - Versioned config file: `/etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf`
+   - Automatically included via wildcard pattern in main config
+   - No manual editing of main nginx config required
+
+   **Verification:**
+   ```bash
+   # Check config was created
+   ls -la /etc/nginx/conf.d/routes/{app}-*.conf
+
+   # Test nginx config
+   sudo nginx -t
+
+   # Reload nginx
+   sudo systemctl reload nginx
+   ```
+
+   **Rollback if needed:**
+   ```bash
+   # Disable this version
+   sudo mv /etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf \
+           /etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf.disabled
+
+   # Re-enable older version (if exists)
+   sudo mv /etc/nginx/conf.d/routes/{app}-{old-version}-{timestamp}.conf.disabled \
+           /etc/nginx/conf.d/routes/{app}-{old-version}-{timestamp}.conf
+
+   # Reload nginx
+   sudo systemctl reload nginx
+   ```
+10. **Verify Deployment**: Test containers, proxy, HTTPS
+11. **Return to Localhost**: Clean up local files
+
+During execution:
+- Show progress for each step
+- Handle errors gracefully
+- Ask user for input when needed (secrets, confirmation)
+- Log all commands executed
+
+### 5.6 Deployment Verification
+After deployment completes, verify:
+
+```bash
+# Check container status
+ssh -i capsule-deploy.pem {user}@{host} "cd /home/{user}/deployments/{app} && docker-compose ps"
+
+# Check nginx config
+ssh -i capsule-deploy.pem {user}@{host} "sudo nginx -t"
+
+# Test HTTPS endpoint
+curl -I https://{host}/{app}/
+```
+
+Display results to user with success/failure status.
+
+## Phase 6: Cleanup & Unregister
+
+### 6.1 Unregister Session
+Regardless of success/failure, unregister session:
+
+```bash
+curl -X POST https://{portal_host}/api/deployment/unregister-session
+```
+
+### 6.2 Clean Temporary Files
+Remove temporary extraction directory:
+
+```bash
+rm -rf "$TEMP_DIR"
+```
+
+### 6.3 Display Final Summary
+```
+═══════════════════════════════════════════════════════════════════
+                    DEPLOYMENT COMPLETE
+═══════════════════════════════════════════════════════════════════
+
+App: {app_name}
+Version: {version}
+URL: https://{host}/{app}/
+
+Status: ✅ Success / ❌ Failed
+
+Next steps:
+- Visit your app: https://{host}/{app}/
+- Monitor logs: ssh -i capsule-deploy.pem {user}@{host}
+- View activity: https://{host}/deploy/activity
+
+═══════════════════════════════════════════════════════════════════
+```
+
+## Error Handling
+
+### Portal Unreachable
+If portal API calls fail (timeout, connection refused):
+- Log warning: "Portal unreachable - proceeding in offline mode"
+- Skip version check (use current skill version)
+- Skip session registration (no conflict detection)
+- Continue with deployment
+
+### ZIP File Corrupted
+If unzip fails:
+- Show error: "ZIP file appears corrupted. Please re-download from portal."
+- List corrupted file path
+- Exit without deploying
+
+### Deployment Failure
+If any step fails:
+- Show clear error message with failed step
+- Show relevant logs/output
+- Ask user: "Retry this step / Skip and continue / Abort deployment"
+- Always unregister session before exiting
+
+### SSH Connection Failed
+If SSH fails:
+- Check if PEM file has correct permissions (chmod 600)
+- Check if user's IP is whitelisted
+- Show troubleshooting steps
+- Exit gracefully
+
+## Edge Cases
+
+1. **No ZIP Files Found**:
+   - Message: "No deployment kits found. Please download a kit from the portal."
+   - Show portal URL for user to visit
+   - Exit
+
+2. **Multiple Users, Same Machine**:
+   - Session tracking is per-user (by email)
+   - Each user can deploy concurrently to different apps
+   - Only block if same user, same app
+
+3. **Version Parse Failure**:
+   - Fall back to file modification time for sorting
+   - Log warning: "Non-standard ZIP filename detected"
+   - Continue with best-effort version extraction
+
+4. **Skill Update During Deployment**:
+   - Only check version at start (Phase 2)
+   - Don't interrupt mid-deployment
+   - Next /deploy invocation will update
+
+5. **Stale Lock Files**:
+   - Portal auto-expires sessions after 30 minutes
+   - Skill can force unregister on completion
+   - User can manually unregister via portal UI
+
+## Security Considerations
+
+- Validate all inputs (app names, versions, paths)
+- Never execute arbitrary commands from user input
+- Validate SSH key permissions before use
+- Use HTTPS for all portal API calls
+- Don't log secrets or API keys
+- Clean up temporary files securely
+
+## Performance Optimizations
+
+- Cache portal version check (60 second TTL)
+- Parallel ZIP scanning (if multiple files)
+- Stream large file transfers
+- Show progress indicators for long operations
+
+
+## Phase 7: Rollback Guide & Checkpoint Summary
+
+**After deployment completes**, display all checkpoints created during this deployment.
+
+This gives the user clear rollback options if issues arise.
+
+```bash
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "        DEPLOYMENT COMPLETE - CHECKPOINT SUMMARY"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "Deployment checkpoints created (newest to oldest):"
+echo ""
+echo "  📸 CHECKPOINT_0: Before deployment started"
+echo "     Label: $CHECKPOINT_0"
+echo "     Use case: Complete rollback to pre-deployment state"
+echo ""
+echo "  [Additional checkpoints created during deployment phases]"
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "                    ROLLBACK INSTRUCTIONS"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "If deployment caused issues, you can rollback:"
+echo ""
+echo "  1. List all checkpoints:"
+echo "     /checkpoint list"
+echo ""
+echo "  2. Restore to pre-deployment state:"
+echo "     /checkpoint restore \$CHECKPOINT_0"
+echo ""
+echo "  3. View checkpoint details:"
+echo "     /checkpoint show \$CHECKPOINT_0"
+echo ""
+echo "  4. Verify portal health after rollback:"
+echo "     /deploy-verify"
+echo ""
+echo "💡 TIP: \$CHECKPOINT_0 is your safety net - it captures"
+echo "   the exact state before deployment started."
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+```
+
+**Why Checkpoints Matter**:
+- **Safety**: Can always return to pre-deployment state
+- **Debugging**: Know exact state at each phase
+- **Confidence**: Deploy knowing you can rollback instantly
+- **Zero downtime**: Restore takes seconds, not hours

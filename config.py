@@ -146,7 +146,8 @@ class Config:
     # Version management
     DEPLOYMENT_VERSION_FORMAT = "%Y%m%d.%H%M%S"
     SESSION_TIMEOUT_MINUTES = 30
-    SKILL_FILE_PATH = "deploy-skill.yaml"
+    SKILL_TEMPLATE_PATH = "deploy-skill-template.md"
+    SKILL_ZIP_PATH = "skills/deploy/SKILL.md"
 
     # Get AWS region from config
     @staticmethod

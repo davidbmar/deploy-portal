@@ -126,3 +126,13 @@ Keep track of ports in use:
 ### Port Conflicts
 - Check which ports are in use: `sudo lsof -i -P -n | grep LISTEN`
 - Update port numbers in both docker-compose.yml and nginx configs
+
+## Versioned Configuration System
+
+The deployment portal uses versioned nginx route files to enable safe deployments and easy rollback.
+
+See [VERSIONED_CONFIGS.md](./VERSIONED_CONFIGS.md) for complete documentation on:
+- How versioned configs work
+- Deploying new versions
+- Rolling back to previous versions
+- Troubleshooting common issues

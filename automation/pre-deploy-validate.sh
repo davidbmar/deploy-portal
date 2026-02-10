@@ -219,6 +219,75 @@ fi
 # ═══════════════════════════════════════════════════════════
 # Check Git Configuration
 # ═══════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+# Check Next.js Environment Variables
+# ═══════════════════════════════════════════════════════════
+log_info "Checking Next.js environment variables..."
+echo "───────────────────────────────────────────────────────────"
+
+ENV_ISSUES=0
+
+# Check frontend/.env.local
+if [ -f "frontend/.env.local" ]; then
+    log_info "Found frontend/.env.local"
+    
+    if grep -q "localhost" frontend/.env.local; then
+        log_error "❌ frontend/.env.local contains localhost URLs"
+        log_error "   This will OVERRIDE docker-compose.yml during build"
+        log_error "   Causing 'Failed to fetch' errors in production"
+        echo ""
+        log_error "   Current content:"
+        grep "NEXT_PUBLIC" frontend/.env.local | sed 's/^/   /'
+        echo ""
+        log_error "   FIX: Update to use HTTPS URL for cloud deployment"
+        log_error "   Example: NEXT_PUBLIC_API_URL=https://your-domain.com/app-name"
+        ERRORS=$((ERRORS + 1))
+        ENV_ISSUES=$((ENV_ISSUES + 1))
+    fi
+fi
+
+# Check NEXT_PUBLIC_API_URL format in docker-compose.yml
+if [ -f "docker-compose.yml" ]; then
+    API_URL=$(grep "NEXT_PUBLIC_API_URL=" docker-compose.yml | head -1 | cut -d'=' -f2-)
+    
+    if [ ! -z "$API_URL" ]; then
+        log_info "Found NEXT_PUBLIC_API_URL: $API_URL"
+        
+        # Check for /api suffix (causes double prefix)
+        if [[ "$API_URL" == *"/api"* ]]; then
+            log_error "❌ NEXT_PUBLIC_API_URL should NOT end with /api"
+            log_error "   Current: $API_URL"
+            log_error "   Should be: ${API_URL%/api*}"
+            log_error "   Frontend code automatically appends /api/"
+            log_error "   This causes double /api/api/ prefix → 404 errors"
+            ERRORS=$((ERRORS + 1))
+            ENV_ISSUES=$((ENV_ISSUES + 1))
+        fi
+        
+        # Check for HTTP (not HTTPS) in cloud deployment
+        if [[ "$API_URL" == "http://"* ]] && [[ "$API_URL" != *"localhost"* ]]; then
+            log_error "❌ NEXT_PUBLIC_API_URL uses HTTP (should be HTTPS)"
+            log_error "   Current: $API_URL"
+            log_error "   Should be: ${API_URL/http:/https:}"
+            log_error "   Browsers block HTTP requests from HTTPS pages"
+            ERRORS=$((ERRORS + 1))
+            ENV_ISSUES=$((ENV_ISSUES + 1))
+        fi
+        
+        if [ $ENV_ISSUES -eq 0 ]; then
+            log_success "✅ NEXT_PUBLIC_API_URL format is valid"
+        fi
+    fi
+fi
+
+if [ $ENV_ISSUES -eq 0 ]; then
+    log_success "✅ Environment variables validated"
+else
+    log_error "❌ Found $ENV_ISSUES environment issue(s) - fix before deploying"
+fi
+
+echo ""
 log_info "Checking git configuration..."
 echo "───────────────────────────────────────────────────────────"
 

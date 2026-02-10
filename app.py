@@ -10,6 +10,7 @@ import glob
 import time
 import re
 import json
+import yaml
 import logging
 
 import sys
@@ -392,7 +393,10 @@ def generate_enhanced_config(app_name, app_type, deploy_mode, auth_mode, email, 
         'portal_version': DEPLOYMENT_VERSION, 'dashboard_api_key': dashboard_api_key,
         'app_framework': frontend_info["framework"],
         'has_separate_backend': has_backend,
-        'requires_nginx_static_block': is_nextjs
+        'requires_nginx_static_block': is_nextjs,
+        'version': version,  # nginx version identifier
+        'nginx_version': version,  # for nginx filename versioning
+        'deploy_timestamp': datetime.utcnow().strftime('%Y%m%d-%H%M%S')  # for nginx filename
     }
 
 
@@ -1732,6 +1736,33 @@ curl -s -o /dev/null -w "Backend: HTTP %{{http_code}}\\n" http://localhost:BACKE
 
 {'**⏭️ SKIP THIS STEP FOR UPDATES** - Nginx is already configured for this app.' if is_update else '**For multi-service apps (frontend + backend), you need nginx location blocks:**'}
 
+**📝 Versioned Nginx Configurations**
+
+Your nginx configuration will be created as a versioned file:
+- Format: `/etc/nginx/conf.d/routes/{app_name}-{version}-{timestamp}.conf`
+- Example: `/etc/nginx/conf.d/routes/my-app-v1-20260203-143000.conf`
+
+**Benefits:**
+- ✅ No manual editing of main nginx config required
+- ✅ Easy rollback: rename `.conf` to `.conf.disabled`
+- ✅ Version history: keep multiple versions side-by-side
+- ✅ Safe deployments: can't corrupt main config
+
+**Rollback if needed:**
+```bash
+# Disable current version
+sudo mv /etc/nginx/conf.d/routes/{app_name}-v2-*.conf /etc/nginx/conf.d/routes/{app_name}-v2-*.conf.disabled
+
+# Enable previous version
+sudo mv /etc/nginx/conf.d/routes/{app_name}-v1-*.conf.disabled /etc/nginx/conf.d/routes/{app_name}-v1-*.conf
+
+# Reload nginx
+sudo systemctl reload nginx
+```
+
+---
+
+
 #### Option A: AUTOMATED (Recommended) - Smart Deploy
 
 **Use the smart-deploy.sh script for automatic framework detection and auth configuration:**
@@ -2608,6 +2639,12 @@ sg docker -c 'docker compose up -d'
             skill_content = f.read()
         # Replace version placeholder with actual version
         skill_content = skill_content.replace('DEPLOYMENT_VERSION_PLACEHOLDER', version)
+        # Validate YAML syntax before including in deployment kit
+        try:
+            yaml.safe_load(skill_content)
+        except yaml.YAMLError as e:
+            logging.error(f'deploy-skill.yaml has invalid YAML syntax: {e}')
+            return None, f'Skill file has invalid YAML syntax: {e}'
     except FileNotFoundError:
         skill_content = None  # Skill file optional for backward compatibility
 

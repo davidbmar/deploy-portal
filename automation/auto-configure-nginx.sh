@@ -1,6 +1,6 @@
 #!/bin/bash
 # auto-configure-nginx.sh - Automatically configure nginx for a deployed app
-# Reads app name and ports from deployment, configures nginx
+# Reads app name, version, and ports from deployment, configures nginx
 
 set -euo pipefail
 
@@ -9,14 +9,16 @@ APP_DIR="${1:-.}"
 # Change to app directory
 cd "$APP_DIR"
 
-# Get app name from config.json or directory name
+# Get app name and version from config.json or directory name
 if [[ -f config.json ]]; then
     APP_NAME=$(python3 -c "import json; print(json.load(open('config.json'))['app_name'])" 2>/dev/null || basename "$PWD")
+    VERSION=$(python3 -c "import json; print(json.load(open('config.json')).get('version', 'v1'))" 2>/dev/null || echo "v1")
 else
     APP_NAME=$(basename "$PWD")
+    VERSION="v1"
 fi
 
-echo "🔍 Detected app: $APP_NAME"
+echo "🔍 Detected app: $APP_NAME (version: $VERSION)"
 
 # Extract ports from docker-compose.yml
 if [[ ! -f docker-compose.yml ]]; then
@@ -38,20 +40,21 @@ fi
 
 echo "📋 Configuration:"
 echo "   App Name: $APP_NAME"
+echo "   Version: $VERSION"
 echo "   Frontend Port: $FRONTEND_PORT"
 echo "   Backend Port: $BACKEND_PORT"
 
 # Check if already configured
 if nginx-register exists "$APP_NAME"; then
     echo "⚠️  Nginx location already exists for $APP_NAME"
-    echo "   To reconfigure, first run: nginx-register remove $APP_NAME"
-    exit 1
+    echo "   A new versioned config will be created."
+    echo "   Remember to disable old version after testing."
 fi
 
-# Configure nginx (auto-detects auth mode from config.json)
+# Configure nginx (auto-detects auth mode from config.json, uses version from config)
 echo ""
 echo "🚀 Configuring nginx..."
-nginx-register add-multiservice "$APP_NAME" "$FRONTEND_PORT" "$BACKEND_PORT"
+nginx-register add-multiservice "$APP_NAME" "$FRONTEND_PORT" "$BACKEND_PORT" auto "$VERSION"
 
 echo ""
 echo "🔄 Reloading nginx..."
@@ -66,3 +69,6 @@ echo ""
 echo "🔧 To test locally:"
 echo "   curl -I http://localhost:$FRONTEND_PORT/$APP_NAME/"
 echo "   curl http://localhost:$BACKEND_PORT/api/"
+echo ""
+echo "📝 Versioned route file created in /etc/nginx/conf.d/routes/"
+echo "   To rollback: sudo /home/ubuntu/src/deploy-portal/automation/nginx-rollback.sh $APP_NAME"

@@ -162,22 +162,21 @@ class Config:
     @staticmethod
     def get_instance_ip():
         """
-        Get instance IP address.
-        Prefers instance metadata, falls back to config.
+        Get instance IP address or domain.
+        Prefers INSTANCE_DOMAIN from config, falls back to instance metadata.
         """
-        # If metadata initialized, use it
-        if Config.INSTANCE_PUBLIC_IP:
-            return Config.INSTANCE_PUBLIC_IP
-
-        # Otherwise fall back to old logic
+        # 1. Check for custom domain first (highest priority)
         loader = ConfigLoader()
-        # Check for custom domain first
         domain = loader.get_config_value('INSTANCE_DOMAIN', default=None)
         if domain:
             logger.info(f"Using instance domain: {domain}")
             return domain
 
-        # Otherwise get public IP
+        # 2. If metadata initialized, use it
+        if Config.INSTANCE_PUBLIC_IP:
+            return Config.INSTANCE_PUBLIC_IP
+
+        # 3. Otherwise get public IP from config or metadata
         ip = loader.get_config_value(
             'PUBLIC_IP',
             metadata_endpoint='public-ipv4',

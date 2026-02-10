@@ -604,7 +604,56 @@ commands:
       6. **Configure App**: Next.js basePath, API URLs, etc.
       7. **Port Conflict Check**: MANDATORY - check for conflicts
       8. **Docker Deploy**: Start containers with sg docker -c wrapper
-      9. **Configure Nginx**: Automated or manual location blocks
+      9. **Configure Nginx**: Create versioned route configuration
+
+         Execute nginx configuration script:
+
+         ```bash
+         cd /home/ubuntu/deployments/{app_name}
+
+         # Option 1: Auto-configure (RECOMMENDED)
+         /home/ubuntu/src/deploy-portal/automation/auto-configure-nginx.sh .
+
+         # Option 2: Manual with nginx-register
+         APP_NAME="{app_name}"
+         VERSION="{version}"
+         FRONTEND_PORT="{frontend_port}"
+         BACKEND_PORT="{backend_port}"
+
+         sudo /home/ubuntu/src/deploy-portal/automation/nginx-register.sh \
+           add-multiservice "$APP_NAME" "$FRONTEND_PORT" "$BACKEND_PORT" auto "$VERSION"
+         ```
+
+         **What this creates:**
+         - Versioned config file: `/etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf`
+         - Automatically included via wildcard pattern in main config
+         - No manual editing of main nginx config required
+
+         **Verification:**
+         ```bash
+         # Check config was created
+         ls -la /etc/nginx/conf.d/routes/{app}-*.conf
+
+         # Test nginx config
+         sudo nginx -t
+
+         # Reload nginx
+         sudo systemctl reload nginx
+         ```
+
+         **Rollback if needed:**
+         ```bash
+         # Disable this version
+         sudo mv /etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf \
+                 /etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf.disabled
+
+         # Re-enable older version (if exists)
+         sudo mv /etc/nginx/conf.d/routes/{app}-{old-version}-{timestamp}.conf.disabled \
+                 /etc/nginx/conf.d/routes/{app}-{old-version}-{timestamp}.conf
+
+         # Reload nginx
+         sudo systemctl reload nginx
+         ```
       10. **Verify Deployment**: Test containers, proxy, HTTPS
       11. **Return to Localhost**: Clean up local files
 
@@ -738,6 +787,59 @@ commands:
       - Stream large file transfers
       - Show progress indicators for long operations
 
+
+      ## Phase 7: Rollback Guide & Checkpoint Summary
+
+      **After deployment completes**, display all checkpoints created during this deployment.
+
+      This gives the user clear rollback options if issues arise.
+
+      ```bash
+      echo ""
+      echo "═══════════════════════════════════════════════════════════"
+      echo "        DEPLOYMENT COMPLETE - CHECKPOINT SUMMARY"
+      echo "═══════════════════════════════════════════════════════════"
+      echo ""
+      echo "Deployment checkpoints created (newest to oldest):"
+      echo ""
+      echo "  📸 CHECKPOINT_0: Before deployment started"
+      echo "     Label: $CHECKPOINT_0"
+      echo "     Use case: Complete rollback to pre-deployment state"
+      echo ""
+      echo "  [Additional checkpoints created during deployment phases]"
+      echo ""
+      echo "═══════════════════════════════════════════════════════════"
+      echo "                    ROLLBACK INSTRUCTIONS"
+      echo "═══════════════════════════════════════════════════════════"
+      echo ""
+      echo "If deployment caused issues, you can rollback:"
+      echo ""
+      echo "  1. List all checkpoints:"
+      echo "     /checkpoint list"
+      echo ""
+      echo "  2. Restore to pre-deployment state:"
+      echo "     /checkpoint restore \$CHECKPOINT_0"
+      echo ""
+      echo "  3. View checkpoint details:"
+      echo "     /checkpoint show \$CHECKPOINT_0"
+      echo ""
+      echo "  4. Verify portal health after rollback:"
+      echo "     /deploy-verify"
+      echo ""
+      echo "💡 TIP: \$CHECKPOINT_0 is your safety net - it captures"
+      echo "   the exact state before deployment started."
+      echo ""
+      echo "═══════════════════════════════════════════════════════════"
+      echo ""
+      ```
+
+      **Why Checkpoints Matter**:
+      - **Safety**: Can always return to pre-deployment state
+      - **Debugging**: Know exact state at each phase
+      - **Confidence**: Deploy knowing you can rollback instantly
+      - **Zero downtime**: Restore takes seconds, not hours
+
+
   - name: deploy status
     description: Check deployment status and active sessions
     instructions: |
@@ -827,55 +929,3 @@ metadata:
   documentation: https://github.com/capsule-cloud/deploy-portal
   version_format: YYYYMMDD.HHmmss
   portal_api_base: /api/deployment
-
-      ## Phase 7: Rollback Guide & Checkpoint Summary
-
-      **After deployment completes**, display all checkpoints created during this deployment.
-
-      This gives the user clear rollback options if issues arise.
-
-      ```bash
-      echo ""
-      echo "═══════════════════════════════════════════════════════════"
-      echo "        DEPLOYMENT COMPLETE - CHECKPOINT SUMMARY"
-      echo "═══════════════════════════════════════════════════════════"
-      echo ""
-      echo "Deployment checkpoints created (newest to oldest):"
-      echo ""
-      echo "  📸 CHECKPOINT_0: Before deployment started"
-      echo "     Label: $CHECKPOINT_0"
-      echo "     Use case: Complete rollback to pre-deployment state"
-      echo ""
-      echo "  [Additional checkpoints created during deployment phases]"
-      echo ""
-      echo "═══════════════════════════════════════════════════════════"
-      echo "                    ROLLBACK INSTRUCTIONS"
-      echo "═══════════════════════════════════════════════════════════"
-      echo ""
-      echo "If deployment caused issues, you can rollback:"
-      echo ""
-      echo "  1. List all checkpoints:"
-      echo "     /checkpoint list"
-      echo ""
-      echo "  2. Restore to pre-deployment state:"
-      echo "     /checkpoint restore \$CHECKPOINT_0"
-      echo ""
-      echo "  3. View checkpoint details:"
-      echo "     /checkpoint show \$CHECKPOINT_0"
-      echo ""
-      echo "  4. Verify portal health after rollback:"
-      echo "     /deploy-verify"
-      echo ""
-      echo "💡 TIP: \$CHECKPOINT_0 is your safety net - it captures"
-      echo "   the exact state before deployment started."
-      echo ""
-      echo "═══════════════════════════════════════════════════════════"
-      echo ""
-      ```
-
-      **Why Checkpoints Matter**:
-      - **Safety**: Can always return to pre-deployment state
-      - **Debugging**: Know exact state at each phase
-      - **Confidence**: Deploy knowing you can rollback instantly
-      - **Zero downtime**: Restore takes seconds, not hours
-

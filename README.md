@@ -903,3 +903,46 @@ Each checkpoint: 10-100MB depending on number of deployed apps.
 
 Recommended: Keep 10-20 checkpoints, clean weekly.
 
+
+## Nginx Configuration Management
+
+The deployment portal uses a **versioned nginx configuration system** for safe, rollback-capable deployments.
+
+### Key Features
+
+- ✅ **No manual editing** of main nginx config file
+- ✅ **Automatic inclusion** via wildcard pattern
+- ✅ **Version history** with timestamped configs
+- ✅ **Easy rollback** by renaming files
+- ✅ **Isolated deployments** - one bad config can't break everything
+
+### Versioned Route Files
+
+Format: `/etc/nginx/conf.d/routes/{app}-{version}-{timestamp}.conf`
+
+Example: `/etc/nginx/conf.d/routes/my-app-v2-20260203-143000.conf`
+
+### Quick Rollback
+
+```bash
+# Disable current version
+sudo mv /etc/nginx/conf.d/routes/my-app-v2-*.conf \
+        /etc/nginx/conf.d/routes/my-app-v2-*.conf.disabled
+
+# Enable previous version
+sudo mv /etc/nginx/conf.d/routes/my-app-v1-*.conf.disabled \
+        /etc/nginx/conf.d/routes/my-app-v1-*.conf
+
+# Reload nginx
+sudo systemctl reload nginx
+```
+
+Or use the rollback utility:
+
+```bash
+sudo nginx-rollback my-app
+```
+
+For complete documentation, see [docs/nginx/VERSIONED_CONFIGS.md](docs/nginx/VERSIONED_CONFIGS.md)
+
+
